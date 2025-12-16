@@ -385,7 +385,7 @@ export default function LandingPage() {
                         </div>
 
                         <div className="text-gray-500 text-sm">
-                            Desarrollado para Tesis de Magíster • 2024
+                            Desarrollado por Felipe Carrasco Grillo para Tesis de Magíster en Informática Médica Universidad de Chile • 2025
                         </div>
                     </div>
                 </div>
