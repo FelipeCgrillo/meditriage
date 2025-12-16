@@ -27,6 +27,10 @@ export default function LandingPage() {
                             <a href="#como-funciona" className="hover:text-white transition-colors">Cómo Funciona</a>
                             <a href="#beneficios" className="hover:text-white transition-colors">Beneficios</a>
                             <a href="#futuro" className="hover:text-white transition-colors">Roadmap</a>
+                            <Link href="/propuesta-piloto" className="hover:text-white transition-colors flex items-center gap-1">
+                                <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
+                                Piloto CESFAM
+                            </Link>
                         </div>
                     </div>
                 </nav>
@@ -324,6 +328,50 @@ export default function LandingPage() {
                                         <h3 className="text-xl font-semibold text-white mb-2">Multi-idioma</h3>
                                         <p className="text-gray-400">Soporte para español, inglés y mapudungun para atención inclusiva a comunidades originarias.</p>
                                     </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            {/* Pilot Invitation Section for Directors */}
+            <section id="piloto" className="relative py-24 bg-gradient-to-b from-slate-800 via-blue-900/30 to-slate-800">
+                <div className="container mx-auto px-6">
+                    <div className="max-w-4xl mx-auto">
+                        <div className="relative bg-gradient-to-br from-emerald-900/40 to-slate-800/80 border border-emerald-500/30 rounded-3xl p-8 md:p-12 overflow-hidden">
+                            {/* Decorative elements */}
+                            <div className="absolute -top-20 -right-20 w-40 h-40 bg-emerald-500/10 rounded-full blur-3xl" />
+                            <div className="absolute -bottom-20 -left-20 w-40 h-40 bg-blue-500/10 rounded-full blur-3xl" />
+
+                            <div className="relative z-10">
+                                <div className="inline-flex items-center gap-2 bg-emerald-500/20 border border-emerald-400/30 rounded-full px-4 py-2 mb-6">
+                                    <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
+                                    <span className="text-emerald-200 text-sm font-medium">Invitación Exclusiva para Directores de CESFAM/SAPU</span>
+                                </div>
+
+                                <h2 className="text-2xl md:text-3xl font-bold text-white mb-4">
+                                    ¿Es usted Director/a de un Centro de Salud?
+                                </h2>
+
+                                <p className="text-gray-300 text-lg mb-8 max-w-2xl">
+                                    Estamos buscando un centro partner para validar MediTriage en un piloto de 2 semanas.
+                                    <strong className="text-white">Sin costo, sin riesgo operacional, y con reportes de gestión gratuitos.</strong>
+                                </p>
+
+                                <div className="flex flex-col sm:flex-row gap-4">
+                                    <Link
+                                        href="/propuesta-piloto"
+                                        className="group inline-flex items-center justify-center gap-3 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white font-semibold px-8 py-4 rounded-2xl transition-all duration-300 shadow-lg shadow-emerald-500/30 hover:shadow-emerald-500/50 hover:scale-105"
+                                    >
+                                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                                        </svg>
+                                        Ver Propuesta Completa
+                                        <svg className="w-5 h-5 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                                        </svg>
+                                    </Link>
                                 </div>
                             </div>
                         </div>
