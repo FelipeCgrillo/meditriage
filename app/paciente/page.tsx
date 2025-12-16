@@ -1,0 +1,75 @@
+'use client';
+
+import { useState } from 'react';
+import { ConsentScreen } from '@/components/ConsentScreen';
+import { SymptomInput } from '@/components/SymptomInput';
+import { SuccessScreen } from '@/components/SuccessScreen';
+import { supabase } from '@/lib/supabase/client';
+import { generateAnonymousCode } from '@/lib/utils/anonymousCode';
+import type { TriageResult } from '@/lib/ai/schemas';
+
+type FlowStep = 'consent' | 'input' | 'success';
+
+export default function PacientePage() {
+    const [currentStep, setCurrentStep] = useState<FlowStep>('consent');
+    const [triageResult, setTriageResult] = useState<TriageResult | null>(null);
+    const [anonymousCode, setAnonymousCode] = useState<string>('');
+
+    const handleConsent = () => {
+        setCurrentStep('input');
+    };
+
+    const handleTriageSuccess = async (result: TriageResult, symptoms: string) => {
+        setTriageResult(result);
+
+        // Generate anonymous patient code
+        const patientCode = generateAnonymousCode();
+
+        // Save to database with anonymous code
+        try {
+            const { data, error } = await supabase
+                .from('clinical_records')
+                .insert({
+                    patient_consent: true,
+                    symptoms_text: symptoms,
+                    ai_response: result as any,
+                    esi_level: result.esi_level,
+                    nurse_validated: false,
+                    anonymous_code: patientCode,
+                } as any)
+                .select('anonymous_code')
+                .single();
+
+            if (error) {
+                console.error('Error saving to database:', error);
+                setAnonymousCode(patientCode);
+            } else {
+                setAnonymousCode(data?.anonymous_code || patientCode);
+            }
+        } catch (error) {
+            console.error('Database error:', error);
+            setAnonymousCode(patientCode);
+        }
+
+        setCurrentStep('success');
+    };
+
+    const handleReset = () => {
+        setCurrentStep('consent');
+        setTriageResult(null);
+        setAnonymousCode('');
+    };
+
+    return (
+        <main>
+            {currentStep === 'consent' && <ConsentScreen onConsent={handleConsent} />}
+            {currentStep === 'input' && <SymptomInput onSuccess={handleTriageSuccess} />}
+            {currentStep === 'success' && (
+                <SuccessScreen
+                    anonymousCode={anonymousCode}
+                    onReset={handleReset}
+                />
+            )}
+        </main>
+    );
+}
