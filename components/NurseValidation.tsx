@@ -131,27 +131,27 @@ export function NurseValidation({ onClose }: NurseValidationProps) {
                 <div className="max-w-4xl mx-auto">
                     <div className="bg-white rounded-2xl shadow-lg p-8">
                         {/* Header */}
-                        <div className="flex items-center justify-between mb-6">
-                            <h2 className="text-2xl font-bold text-gray-900">Validación de Triaje</h2>
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+                            <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Validación de Triaje</h2>
                             <Button variant="secondary" onClick={handleBackToList}>
                                 ← Volver
                             </Button>
                         </div>
 
                         {/* Anonymous Code - PROMINENT */}
-                        <div className="mb-6 p-4 bg-yellow-50 border-4 border-yellow-400 rounded-xl shadow-md">
-                            <div className="flex items-center justify-center gap-3">
-                                <svg className="w-8 h-8 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <div className="mb-6 p-3 sm:p-4 bg-yellow-50 border-4 border-yellow-400 rounded-xl shadow-md">
+                            <div className="flex items-center justify-center gap-2 sm:gap-3">
+                                <svg className="w-6 h-6 sm:w-8 sm:h-8 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" />
                                 </svg>
                                 <div className="text-center">
-                                    <p className="text-sm font-medium text-yellow-800 mb-1">Código del Paciente</p>
-                                    <p className="text-4xl font-mono font-bold text-yellow-900 tracking-widest">
+                                    <p className="text-xs sm:text-sm font-medium text-yellow-800 mb-1">Código del Paciente</p>
+                                    <p className="text-2xl sm:text-4xl font-mono font-bold text-yellow-900 tracking-widest">
                                         {selectedRecord.anonymous_code || 'Sin código'}
                                     </p>
                                 </div>
                             </div>
-                            <p className="text-center text-yellow-700 text-sm mt-2">
+                            <p className="text-center text-yellow-700 text-xs sm:text-sm mt-2">
                                 ⚠️ Confirme este código con el paciente antes de validar
                             </p>
                         </div>
@@ -187,12 +187,12 @@ export function NurseValidation({ onClose }: NurseValidationProps) {
                                     seleccione el nivel ESI que usted considera apropiado:
                                 </p>
 
-                                <div className="grid grid-cols-5 gap-2 mb-4">
+                                <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 mb-4">
                                     {[1, 2, 3, 4, 5].map((level) => (
                                         <button
                                             key={level}
                                             onClick={() => setNurseEstimation(level)}
-                                            className={`p-4 rounded-lg font-bold text-lg transition-all ${nurseEstimation === level
+                                            className={`p-3 sm:p-4 rounded-lg font-bold text-base sm:text-lg transition-all ${nurseEstimation === level
                                                 ? getESIColor(level) + ' ring-4 ring-offset-2 ring-blue-500 scale-105'
                                                 : 'bg-white border-2 border-gray-300 text-gray-700 hover:border-blue-400'
                                                 }`}
@@ -299,7 +299,7 @@ export function NurseValidation({ onClose }: NurseValidationProps) {
                                         <p className="text-yellow-800 mb-3">
                                             Existe una diferencia en la clasificación:
                                         </p>
-                                        <div className="grid grid-cols-2 gap-4">
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                                             <div className="bg-white p-3 rounded-lg border border-yellow-300">
                                                 <p className="text-xs text-gray-600 mb-1">Su Clasificación:</p>
                                                 <p className="font-bold text-yellow-900">ESI Nivel {nurseEstimation}</p>
@@ -338,11 +338,11 @@ export function NurseValidation({ onClose }: NurseValidationProps) {
             <div className="max-w-6xl mx-auto">
                 <div className="bg-white rounded-2xl shadow-lg p-8">
                     {/* Header */}
-                    <div className="mb-8">
-                        <h1 className="text-3xl font-bold text-gray-900 mb-2">
+                    <div className="mb-6 sm:mb-8">
+                        <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">
                             Dashboard de Enfermería
                         </h1>
-                        <p className="text-gray-600">
+                        <p className="text-gray-600 text-sm sm:text-base">
                             Registros pendientes de validación: <span className="font-bold text-medical-primary">{records.length}</span>
                         </p>
                     </div>
@@ -360,35 +360,35 @@ export function NurseValidation({ onClose }: NurseValidationProps) {
                             {records.map((record) => (
                                 <div
                                     key={record.id}
-                                    className="border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow cursor-pointer hover:border-medical-primary"
+                                    className="border border-gray-200 rounded-lg p-4 sm:p-6 hover:shadow-md transition-shadow cursor-pointer hover:border-medical-primary"
                                     onClick={() => handleSelectRecord(record)}
                                 >
-                                    <div className="flex items-center justify-between mb-4">
+                                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-4 mb-3 sm:mb-4">
                                         {/* Anonymous Code - PROMINENT */}
-                                        <div className="flex items-center gap-3">
-                                            <div className="px-4 py-2 rounded-lg font-mono font-bold text-xl bg-yellow-100 text-yellow-900 border-2 border-yellow-400">
+                                        <div className="flex items-center gap-2 sm:gap-3">
+                                            <div className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg font-mono font-bold text-lg sm:text-xl bg-yellow-100 text-yellow-900 border-2 border-yellow-400">
                                                 {record.anonymous_code || '---'}
                                             </div>
-                                            <div className="px-3 py-1 rounded-lg text-sm font-semibold bg-blue-100 text-blue-800 border border-blue-300">
+                                            <div className="px-2 sm:px-3 py-1 rounded-lg text-xs sm:text-sm font-semibold bg-blue-100 text-blue-800 border border-blue-300">
                                                 📋 Pendiente
                                             </div>
                                         </div>
-                                        <span className="text-sm text-gray-500">
+                                        <span className="text-xs sm:text-sm text-gray-500">
                                             {new Date(record.created_at).toLocaleString('es-CL')}
                                         </span>
                                     </div>
-                                    <p className="text-gray-700 line-clamp-2 mb-3">
+                                    <p className="text-gray-700 text-sm sm:text-base line-clamp-2 mb-2 sm:mb-3">
                                         {record.symptoms_text}
                                     </p>
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-2 text-sm text-gray-600">
+                                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                        <div className="flex items-center gap-2 text-xs sm:text-sm text-gray-600">
                                             <span>Especialidad:</span>
                                             <span className="font-medium text-medical-primary">
                                                 {getTriageResult(record).suggested_specialty}
                                             </span>
                                         </div>
                                         <span className="text-xs text-medical-primary font-medium">
-                                            Click para validar →
+                                            Toca para validar →
                                         </span>
                                     </div>
                                 </div>
