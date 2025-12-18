@@ -53,6 +53,8 @@ export interface ClinicalRecord {
     patient_gender?: string | null;
     patient_age_group?: string | null;
     consent_eligible?: boolean | null;
+    // Conversation history from AI follow-up questions
+    conversation_history?: Json | null;
 }
 
 /**
@@ -69,6 +71,7 @@ export interface ClinicalRecordInsert {
     nurse_validated?: boolean;
     nurse_id?: string | null;
     fhir_bundle?: Json | null;
+    conversation_history?: Json | null;
 }
 
 /**

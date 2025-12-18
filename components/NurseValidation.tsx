@@ -5,6 +5,8 @@ import { Button } from './ui/Button';
 import type { ClinicalRecord } from '@/lib/supabase/types';
 import type { TriageResult } from '@/lib/ai/schemas';
 import { supabase } from '@/lib/supabase/client';
+import { LogoutButton } from './auth/LogoutButton';
+import { useAuth } from './auth/AuthProvider';
 
 interface NurseValidationProps {
     onClose?: () => void;
@@ -15,10 +17,23 @@ function getTriageResult(record: ClinicalRecord): TriageResult {
     return record.ai_response as unknown as TriageResult;
 }
 
+// Conversation message structure
+interface ConversationMessage {
+    role: 'patient' | 'ai';
+    content: string;
+}
+
+// Helper to parse conversation history from JSON
+function getConversationHistory(record: ClinicalRecord): ConversationMessage[] | null {
+    if (!record.conversation_history) return null;
+    return record.conversation_history as unknown as ConversationMessage[];
+}
+
 export function NurseValidation({ onClose }: NurseValidationProps) {
     const [records, setRecords] = useState<ClinicalRecord[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [selectedRecord, setSelectedRecord] = useState<ClinicalRecord | null>(null);
+    const { profile } = useAuth();
 
     // NEW: Blind validation states
     const [isRevealed, setIsRevealed] = useState(false);
@@ -165,6 +180,39 @@ export function NurseValidation({ onClose }: NurseValidationProps) {
                                 <p className="text-gray-800 whitespace-pre-wrap">{selectedRecord.symptoms_text}</p>
                             </div>
                         </div>
+
+                        {/* Conversation History - Show AI follow-up questions and patient responses */}
+                        {(() => {
+                            const conversationHistory = getConversationHistory(selectedRecord);
+                            if (!conversationHistory || conversationHistory.length === 0) return null;
+
+                            return (
+                                <div className="mb-6">
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                                        📝 Historial de Conversación con IA
+                                    </label>
+                                    <div className="bg-purple-50 p-4 rounded-lg border-2 border-purple-200 space-y-3">
+                                        <p className="text-xs text-purple-600 mb-2">
+                                            La IA solicitó información adicional para una clasificación más precisa:
+                                        </p>
+                                        {conversationHistory.map((msg, idx) => (
+                                            <div
+                                                key={idx}
+                                                className={`p-3 rounded-lg ${msg.role === 'patient'
+                                                        ? 'bg-blue-100 border border-blue-300 ml-4'
+                                                        : 'bg-yellow-100 border border-yellow-300 mr-4'
+                                                    }`}
+                                            >
+                                                <p className="text-xs font-semibold text-gray-600 mb-1">
+                                                    {msg.role === 'patient' ? '👤 Paciente' : '🤖 Pregunta IA'}
+                                                </p>
+                                                <p className="text-gray-800">{msg.content}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            );
+                        })()}
 
                         {/* Timestamp */}
                         <div className="mb-6">
@@ -337,14 +385,24 @@ export function NurseValidation({ onClose }: NurseValidationProps) {
         <div className="min-h-screen bg-gray-100 p-4 md:p-8">
             <div className="max-w-6xl mx-auto">
                 <div className="bg-white rounded-2xl shadow-lg p-8">
-                    {/* Header */}
-                    <div className="mb-6 sm:mb-8">
-                        <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">
-                            Dashboard de Enfermería
-                        </h1>
-                        <p className="text-gray-600 text-sm sm:text-base">
-                            Registros pendientes de validación: <span className="font-bold text-medical-primary">{records.length}</span>
-                        </p>
+                    {/* Header with user info */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 sm:mb-8">
+                        <div>
+                            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">
+                                Dashboard de Enfermería
+                            </h1>
+                            <p className="text-gray-600 text-sm sm:text-base">
+                                Registros pendientes de validación: <span className="font-bold text-medical-primary">{records.length}</span>
+                            </p>
+                        </div>
+                        <div className="flex items-center gap-4">
+                            {profile && (
+                                <span className="text-sm text-gray-600">
+                                    👤 {profile.full_name || profile.email}
+                                </span>
+                            )}
+                            <LogoutButton redirectTo="/login/nurse" />
+                        </div>
                     </div>
 
                     {/* Records List */}

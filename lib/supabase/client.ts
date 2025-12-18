@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { createBrowserClient } from '@supabase/ssr';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -9,14 +9,14 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 /**
  * Supabase client for browser/client-side usage
- * Note: Using default typing for flexibility with JSONB fields
+ * Uses @supabase/ssr for proper cookie-based authentication
  */
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey);
 
 /**
- * Create a Supabase client for server-side usage (API routes)
- * Uses the same credentials but can be extended with service role key if needed
+ * Create a new browser client instance
+ * Use this when you need a fresh client
  */
-export function createServerClient() {
-    return createClient(supabaseUrl, supabaseAnonKey);
+export function createClient() {
+    return createBrowserClient(supabaseUrl, supabaseAnonKey);
 }

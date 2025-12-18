@@ -6,14 +6,16 @@ import { Spinner } from './ui/Spinner';
 import { useVoiceInput } from '@/lib/hooks/useVoiceInput';
 import type { TriageResult } from '@/lib/ai/schemas';
 
-interface SymptomInputProps {
-    onSuccess: (result: TriageResult, symptoms: string) => void;
-}
-
 interface ConversationMessage {
     role: 'patient' | 'ai';
     content: string;
 }
+
+interface SymptomInputProps {
+    onSuccess: (result: TriageResult, symptoms: string, conversationHistory?: ConversationMessage[]) => void;
+}
+
+
 
 export function SymptomInput({ onSuccess }: SymptomInputProps) {
     const [symptoms, setSymptoms] = useState('');
@@ -108,7 +110,11 @@ export function SymptomInput({ onSuccess }: SymptomInputProps) {
                     // AI has classified, show success
                     // Concatenate conversation if it exists
                     const fullSymptoms = initialSymptoms || symptoms;
-                    onSuccess(result, fullSymptoms);
+                    // Pass conversation history if there was a multi-turn conversation
+                    const historyToSave = conversationMessages.length > 0
+                        ? [...conversationMessages, { role: 'patient' as const, content: symptoms }]
+                        : undefined;
+                    onSuccess(result, fullSymptoms, historyToSave);
                 } else {
                     throw new Error('Respuesta inesperada del servidor');
                 }

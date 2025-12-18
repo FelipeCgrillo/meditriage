@@ -3,16 +3,26 @@
 import React, { useState } from 'react';
 import { Button } from './ui/Button';
 
+export interface DemographicData {
+    gender: string | null;
+    ageGroup: string | null;
+}
+
 interface ConsentScreenProps {
-    onConsent: () => void;
+    onConsent: (demographics: DemographicData) => void;
 }
 
 export function ConsentScreen({ onConsent }: ConsentScreenProps) {
     const [hasConsented, setHasConsented] = useState(false);
+    const [gender, setGender] = useState<string>('');
+    const [ageGroup, setAgeGroup] = useState<string>('');
 
     const handleSubmit = () => {
         if (hasConsented) {
-            onConsent();
+            onConsent({
+                gender: gender || null,
+                ageGroup: ageGroup || null,
+            });
         }
     };
 
@@ -66,6 +76,53 @@ export function ConsentScreen({ onConsent }: ConsentScreenProps) {
                             <span>El sistema NO reemplaza la evaluación médica profesional.</span>
                         </li>
                     </ul>
+                </div>
+
+                {/* Demographic Data Section */}
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-6 mb-6">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                        Datos Demográficos
+                    </h3>
+                    <p className="text-sm text-gray-600 mb-4">
+                        Esta información ayuda a evaluar la equidad del sistema. Es voluntaria.
+                    </p>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Gender Selection */}
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                Género
+                            </label>
+                            <select
+                                value={gender}
+                                onChange={(e) => setGender(e.target.value)}
+                                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-medical-primary focus:border-medical-primary bg-white text-gray-900"
+                            >
+                                <option value="">Seleccionar (opcional)</option>
+                                <option value="M">Masculino</option>
+                                <option value="F">Femenino</option>
+                                <option value="Other">Otro</option>
+                                <option value="Prefer not to say">Prefiero no decir</option>
+                            </select>
+                        </div>
+
+                        {/* Age Group Selection */}
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                Grupo de Edad
+                            </label>
+                            <select
+                                value={ageGroup}
+                                onChange={(e) => setAgeGroup(e.target.value)}
+                                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-medical-primary focus:border-medical-primary bg-white text-gray-900"
+                            >
+                                <option value="">Seleccionar (opcional)</option>
+                                <option value="Pediatric">Pediátrico (0-17 años)</option>
+                                <option value="Adult">Adulto (18-64 años)</option>
+                                <option value="Geriatric">Geriátrico (65+ años)</option>
+                            </select>
+                        </div>
+                    </div>
                 </div>
 
                 {/* Consent Checkbox */}

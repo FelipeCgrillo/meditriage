@@ -2,6 +2,9 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/lib/supabase/client';
+import { LogoutButton } from '@/components/auth/LogoutButton';
+import { useAuth } from '@/components/auth/AuthProvider';
+import { UserManagementPanel } from '@/components/admin/UserManagementPanel';
 
 // =============================================================================
 // TYPES
@@ -398,6 +401,8 @@ export default function ResultadosPage() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [eligibleOnly, setEligibleOnly] = useState(false);
+    const [showUserPanel, setShowUserPanel] = useState(false);
+    const { profile } = useAuth();
 
     // Fetch data from Supabase
     const fetchData = async () => {
@@ -480,6 +485,12 @@ export default function ResultadosPage() {
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-slate-50 via-gray-50 to-blue-50">
+            {/* User Management Panel */}
+            <UserManagementPanel
+                isOpen={showUserPanel}
+                onClose={() => setShowUserPanel(false)}
+            />
+
             {/* HEADER */}
             <header className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-10">
                 <div className="max-w-7xl mx-auto px-4 py-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -493,9 +504,26 @@ export default function ResultadosPage() {
                             Datos en Tiempo Real
                         </p>
                     </div>
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-3 flex-wrap">
+                        {/* User info */}
+                        {profile && (
+                            <span className="text-sm text-gray-600">
+                                👤 {profile.full_name || profile.email}
+                            </span>
+                        )}
+                        {/* User Management Button */}
+                        <button
+                            onClick={() => setShowUserPanel(true)}
+                            className="flex items-center gap-2 px-3 py-2 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition-colors text-sm font-medium"
+                            title="Gestionar usuarios"
+                        >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+                            </svg>
+                            <span className="hidden sm:inline">Usuarios</span>
+                        </button>
                         {/* Eligibility Toggle */}
-                        <label className="flex items-center gap-2 cursor-pointer bg-gray-100 px-4 py-2 rounded-lg">
+                        <label className="flex items-center gap-2 cursor-pointer bg-gray-100 px-3 py-2 rounded-lg">
                             <input
                                 type="checkbox"
                                 checked={eligibleOnly}
@@ -507,6 +535,7 @@ export default function ResultadosPage() {
                         <button onClick={fetchData} className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700" title="Actualizar datos">
                             <RefreshIcon />
                         </button>
+                        <LogoutButton redirectTo="/login/resultados" />
                     </div>
                 </div>
             </header>

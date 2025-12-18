@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ConsentScreen } from '@/components/ConsentScreen';
+import { ConsentScreen, DemographicData } from '@/components/ConsentScreen';
 import { SymptomInput } from '@/components/SymptomInput';
 import { SuccessScreen } from '@/components/SuccessScreen';
 import { supabase } from '@/lib/supabase/client';
@@ -10,22 +10,29 @@ import type { TriageResult } from '@/lib/ai/schemas';
 
 type FlowStep = 'consent' | 'input' | 'success';
 
+interface ConversationMessage {
+    role: 'patient' | 'ai';
+    content: string;
+}
+
 export default function PacientePage() {
     const [currentStep, setCurrentStep] = useState<FlowStep>('consent');
     const [triageResult, setTriageResult] = useState<TriageResult | null>(null);
     const [anonymousCode, setAnonymousCode] = useState<string>('');
+    const [demographics, setDemographics] = useState<DemographicData | null>(null);
 
-    const handleConsent = () => {
+    const handleConsent = (demographicData: DemographicData) => {
+        setDemographics(demographicData);
         setCurrentStep('input');
     };
 
-    const handleTriageSuccess = async (result: TriageResult, symptoms: string) => {
+    const handleTriageSuccess = async (result: TriageResult, symptoms: string, conversationHistory?: ConversationMessage[]) => {
         setTriageResult(result);
 
         // Generate anonymous patient code
         const patientCode = generateAnonymousCode();
 
-        // Save to database with anonymous code
+        // Save to database with anonymous code and demographic data
         try {
             const { data, error } = await supabase
                 .from('clinical_records')
@@ -36,6 +43,9 @@ export default function PacientePage() {
                     esi_level: result.esi_level,
                     nurse_validated: false,
                     anonymous_code: patientCode,
+                    patient_gender: demographics?.gender || null,
+                    patient_age_group: demographics?.ageGroup || null,
+                    conversation_history: conversationHistory || null,
                 } as any)
                 .select('anonymous_code')
                 .single();
@@ -58,6 +68,7 @@ export default function PacientePage() {
         setCurrentStep('consent');
         setTriageResult(null);
         setAnonymousCode('');
+        setDemographics(null);
     };
 
     return (
