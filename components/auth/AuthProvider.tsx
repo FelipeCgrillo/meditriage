@@ -42,21 +42,32 @@ export function AuthProvider({ children }: AuthProviderProps) {
     useEffect(() => {
         // Get initial session
         async function getInitialSession() {
-            const { data: { session } } = await supabase.auth.getSession();
-            setSession(session);
-            setUser(session?.user ?? null);
+            try {
+                const { data: { session } } = await supabase.auth.getSession();
+                setSession(session);
+                setUser(session?.user ?? null);
 
-            if (session?.user) {
-                const { data: profileData } = await supabase
-                    .from('user_profiles')
-                    .select('*')
-                    .eq('id', session.user.id)
-                    .single();
+                if (session?.user) {
+                    try {
+                        const { data: profileData, error } = await supabase
+                            .from('user_profiles')
+                            .select('*')
+                            .eq('id', session.user.id)
+                            .single();
 
-                setProfile(profileData as UserProfile | null);
+                        if (!error && profileData) {
+                            setProfile(profileData as UserProfile);
+                        }
+                    } catch (profileError) {
+                        // Profile table may not exist or RLS blocks access - continue without profile
+                        console.warn('Could not fetch user profile:', profileError);
+                    }
+                }
+            } catch (err) {
+                console.error('Auth session error:', err);
+            } finally {
+                setLoading(false);
             }
-
-            setLoading(false);
         }
 
         getInitialSession();
@@ -68,13 +79,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
                 setUser(session?.user ?? null);
 
                 if (session?.user) {
-                    const { data: profileData } = await supabase
-                        .from('user_profiles')
-                        .select('*')
-                        .eq('id', session.user.id)
-                        .single();
+                    try {
+                        const { data: profileData, error } = await supabase
+                            .from('user_profiles')
+                            .select('*')
+                            .eq('id', session.user.id)
+                            .single();
 
-                    setProfile(profileData as UserProfile | null);
+                        if (!error && profileData) {
+                            setProfile(profileData as UserProfile);
+                        }
+                    } catch (profileError) {
+                        console.warn('Could not fetch user profile on auth change:', profileError);
+                    }
                 } else {
                     setProfile(null);
                 }

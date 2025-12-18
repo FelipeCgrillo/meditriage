@@ -402,7 +402,7 @@ export default function ResultadosPage() {
     const [error, setError] = useState<string | null>(null);
     const [eligibleOnly, setEligibleOnly] = useState(false);
     const [showUserPanel, setShowUserPanel] = useState(false);
-    const { profile } = useAuth();
+    const { profile, loading: authLoading } = useAuth();
 
     // Fetch data from Supabase
     const fetchData = async () => {
@@ -427,8 +427,11 @@ export default function ResultadosPage() {
     };
 
     useEffect(() => {
-        fetchData();
-    }, []);
+        // Only fetch data after auth is ready to avoid RLS issues
+        if (!authLoading) {
+            fetchData();
+        }
+    }, [authLoading]);
 
     // Filter records by eligibility if toggle is on
     const filteredRecords = useMemo(() => {
