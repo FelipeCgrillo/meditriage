@@ -73,6 +73,12 @@ export const TriageResponseSchema = z.object({
         .string()
         .optional()
         .describe("Explanation of why more information is needed. Required when status=needs_info. Example: 'Input vago sin síntomas físicos'"),
+
+    response_options: z
+        .array(z.string())
+        .max(5)
+        .optional()
+        .describe("Suggested quick reply options for the patient (max 5). Example: ['Sí', 'No', 'No estoy seguro']. Recommended when status=needs_info."),
 });
 
 export type TriageResponse = z.infer<typeof TriageResponseSchema>;
@@ -83,8 +89,8 @@ export type TriageResponse = z.infer<typeof TriageResponseSchema>;
 export const TriageInputSchema = z.object({
     symptoms: z
         .string()
-        .min(10, 'Los síntomas deben tener al menos 10 caracteres')
-        .max(2000, 'Los síntomas no pueden exceder 2000 caracteres'),
+        .min(2, 'La respuesta debe tener al menos 2 caracteres')
+        .max(2000, 'La respuesta no puede exceder 2000 caracteres'),
 
     patient_id: z.string().uuid().optional(),
     nurse_id: z.string().uuid().optional(),

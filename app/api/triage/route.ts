@@ -44,16 +44,25 @@ export async function POST(request: NextRequest) {
 
         // Extract conversation history if present (for multi-turn conversations)
         const conversationHistory = body.conversationHistory as string[] | undefined;
+        
+        console.log('[Triage API] Received request:', {
+            symptomsLength: symptoms.length,
+            historyLength: conversationHistory?.length || 0,
+        });
 
         // Build prompt with conversation history if present
         let userPrompt = '';
 
         if (conversationHistory && conversationHistory.length > 0) {
             // Multi-turn conversation: include history
+            // Limit history to prevent token overflow
+            const limitedHistory = conversationHistory.slice(-6);
+            console.log('[Triage API] Using conversation history:', limitedHistory.length, 'messages');
+            
             userPrompt = `Esta es una conversación de seguimiento. El paciente inicialmente reportó síntomas vagos y tú solicitaste más información.
 
 CONVERSACIÓN:
-${conversationHistory.join('\n')}
+${limitedHistory.join('\n')}
 
 NUEVA RESPUESTA DEL PACIENTE:
 ${symptoms}
@@ -71,6 +80,9 @@ ${symptoms}
 Proporciona tu evaluación estructurada siguiendo el protocolo ESI.`;
         }
 
+        console.log('[Triage API] Calling AI model...');
+        const startTime = Date.now();
+        
         // Generate structured triage assessment using AI
         const { object: triageResponse } = await generateObject({
             model: aiModel,
@@ -79,6 +91,9 @@ Proporciona tu evaluación estructurada siguiendo el protocolo ESI.`;
             prompt: userPrompt,
             temperature: 0.3, // Low temperature for consistent medical reasoning
         });
+        
+        const duration = Date.now() - startTime;
+        console.log('[Triage API] AI response received in', duration, 'ms');
 
         // Validate the AI response
         const validatedResult = TriageResponseSchema.parse(triageResponse);
@@ -89,7 +104,12 @@ Proporciona tu evaluación estructurada siguiendo el protocolo ESI.`;
         });
 
     } catch (error) {
-        console.error('Triage API Error:', error);
+        console.error('[Triage API] Error:', error);
+        console.error('[Triage API] Error details:', {
+            name: error instanceof Error ? error.name : 'Unknown',
+            message: error instanceof Error ? error.message : String(error),
+            stack: error instanceof Error ? error.stack : undefined,
+        });
 
         // Return fallback mode on any error
         // This ensures the system never blocks nurse workflow
