@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { Activity, Shield, Users, ArrowRight, CheckCircle2, Heart } from 'lucide-react';
 
 export default function Home() {
@@ -72,9 +73,11 @@ export default function Home() {
 
                     <div className="relative">
                         <div className="relative bg-white/40 backdrop-blur-3xl rounded-[40px] border border-white/40 p-2 shadow-2xl ring-1 ring-slate-900/5 rotate-3">
-                            <img
+                            <Image
                                 src="https://images.unsplash.com/photo-1576091160550-2173dba999ef?auto=format&fit=crop&q=80&w=800&h=1000"
                                 alt="Modern Healthcare"
+                                width={800}
+                                height={1000}
                                 className="rounded-[32px] shadow-sm grayscale-[0.2]"
                             />
                             {/* Floating AI Card */}

@@ -175,7 +175,7 @@ export default function ChatInterface() {
                         <div className="space-y-2">
                             <h3 className="text-lg font-bold text-slate-800">¿Cómo se siente hoy?</h3>
                             <p className="text-sm text-slate-500 max-w-xs mx-auto leading-relaxed">
-                                Describa sus síntomas con sus propias palabras. Por ejemplo: "Me duele el pecho hace 2 horas".
+                                Describa sus síntomas con sus propias palabras. Por ejemplo: &quot;Me duele el pecho hace 2 horas&quot;.
                             </p>
                         </div>
                     </div>
