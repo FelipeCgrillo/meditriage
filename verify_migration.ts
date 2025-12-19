@@ -9,7 +9,7 @@
 
 import { config } from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
-import type { Database } from './lib/supabase/types';
+import type { Database } from './src/lib/supabase/types';
 
 // Cargar variables de entorno
 config({ path: '.env.local' });
