@@ -39,6 +39,7 @@ export async function middleware(request: NextRequest) {
     // Define protected routes and their required roles
     const protectedRoutes: Record<string, string[]> = {
         '/nurse': ['nurse', 'admin'],
+        '/nurse/dashboard': ['nurse', 'admin'],
         '/resultados': ['researcher', 'admin'],
     };
 
@@ -90,7 +91,7 @@ export async function middleware(request: NextRequest) {
 
         if (profile) {
             if (profile.role === 'nurse' || profile.role === 'admin') {
-                url.pathname = '/nurse';
+                url.pathname = '/nurse/dashboard';
             } else if (profile.role === 'researcher') {
                 url.pathname = '/resultados';
             } else {

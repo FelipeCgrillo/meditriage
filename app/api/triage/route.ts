@@ -1,121 +1,59 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { generateObject } from 'ai';
-import { aiModel, validateAIConfig } from '@/lib/ai/config';
-import { TriageResponseSchema, TriageInputSchema } from '@/lib/ai/schemas';
-import { ESI_SYSTEM_PROMPT, FALLBACK_MESSAGE } from '@/lib/ai/prompts';
+import { streamText } from 'ai';
+import { anthropic } from '@ai-sdk/anthropic';
+import { TRIAGE_SYSTEM_PROMPT, FALLBACK_MESSAGE } from '@/lib/ai/prompts';
+import { sanitizeForAI } from '@/lib/utils/pii-filter';
+
+export const runtime = 'edge';
 
 /**
  * POST /api/triage
- * Analyzes patient symptoms and returns ESI classification
- * 
- * PRIVACY: This endpoint is stateless and does not log patient data
+ * Analyzes patient symptoms and returns ESI classification via streaming
  */
-export async function POST(request: NextRequest) {
+export async function POST(req: Request) {
     try {
-        // Validate AI configuration
-        if (!validateAIConfig()) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    error: 'AI service not configured',
-                    fallback: true,
-                    message: FALLBACK_MESSAGE,
-                },
-                { status: 503 }
-            );
+        const body = await req.json();
+        let { symptoms } = body;
+
+        if (!symptoms) {
+            return new Response(JSON.stringify({ error: 'Symptoms are required' }), {
+                status: 400,
+                headers: { 'Content-Type': 'application/json' },
+            });
         }
 
-        // Parse and validate request body
-        const body = await request.json();
-        const validationResult = TriageInputSchema.safeParse(body);
+        // 1. Sanitizar datos del paciente (PII)
+        const sanitizedSymptoms = sanitizeForAI(symptoms);
 
-        if (!validationResult.success) {
-            return NextResponse.json(
-                {
-                    success: false,
-                    error: 'Invalid input',
-                    details: validationResult.error.errors,
-                },
-                { status: 400 }
-            );
-        }
-
-        const { symptoms } = validationResult.data;
-
-        // Extract conversation history if present (for multi-turn conversations)
-        const conversationHistory = body.conversationHistory as string[] | undefined;
-
-        // Build prompt with conversation history if present
-        let userPrompt = '';
-
-        if (conversationHistory && conversationHistory.length > 0) {
-            // Multi-turn conversation: include history
-            userPrompt = `Esta es una conversación de seguimiento. El paciente inicialmente reportó síntomas vagos y tú solicitaste más información.
-
-CONVERSACIÓN:
-${conversationHistory.join('\n')}
-
-NUEVA RESPUESTA DEL PACIENTE:
-${symptoms}
-
-Ahora con esta información adicional, evalúa si tienes suficiente contexto para clasificar, o si necesitas más aclaraciones. Proporciona tu evaluación estructurada siguiendo el protocolo ESI.`;
-        } else {
-            // First interaction
-            userPrompt = `Analiza los siguientes síntomas del paciente.
-
-Recuerda: Si el input es vago (sin síntomas físicos específicos, ubicación, o temporalidad), debes solicitar más información usando status: 'needs_info' en lugar de clasificar.
-
-Síntomas reportados:
-${symptoms}
-
-Proporciona tu evaluación estructurada siguiendo el protocolo ESI.`;
-        }
-
-        // Generate structured triage assessment using AI
-        const { object: triageResponse } = await generateObject({
-            model: aiModel,
-            schema: TriageResponseSchema,
-            system: ESI_SYSTEM_PROMPT,
-            prompt: userPrompt,
-            temperature: 0.3, // Low temperature for consistent medical reasoning
+        // 2. Llamada a la IA con Streaming
+        const result = await streamText({
+            model: anthropic('claude-3-5-sonnet-20240620'),
+            system: TRIAGE_SYSTEM_PROMPT,
+            prompt: `Paciente presenta los siguientes síntomas: ${sanitizedSymptoms}`,
+            temperature: 0.3,
         });
 
-        // Validate the AI response
-        const validatedResult = TriageResponseSchema.parse(triageResponse);
-
-        return NextResponse.json({
-            success: true,
-            data: validatedResult,
-        });
+        return result.toDataStreamResponse();
 
     } catch (error) {
-        console.error('Triage API Error:', error);
+        console.error('Triage AI Error:', error);
 
-        // Return fallback mode on any error
-        // This ensures the system never blocks nurse workflow
-        return NextResponse.json(
+        // Respuesta de fallback de seguridad
+        return new Response(
+            JSON.stringify({
+                status: 'error',
+                esi_level: 2, // Por precaución asumimos prioridad alta en error
+                reasoning: 'Error técnico en el procesamiento de IA.',
+                suggested_action: 'Error técnico, acuda a urgencias por precaución.',
+                follow_up_question: null,
+                message: FALLBACK_MESSAGE
+            }),
             {
-                success: false,
-                error: 'AI analysis failed',
-                fallback: true,
-                message: FALLBACK_MESSAGE,
-                details: error instanceof Error ? error.message : 'Unknown error',
-            },
-            { status: 500 }
+                status: 500,
+                headers: { 'Content-Type': 'application/json' },
+            }
         );
     }
 }
 
-/**
- * GET /api/triage
- * Health check endpoint
- */
-export async function GET() {
-    const isConfigured = validateAIConfig();
 
-    return NextResponse.json({
-        status: isConfigured ? 'operational' : 'degraded',
-        service: 'ESI Triage API',
-        ai_configured: isConfigured,
-    });
-}
+
