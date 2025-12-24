@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { TriageList } from "@/components/dashboard/TriageList";
 import { createClient } from "@/lib/supabase/client";
 import { useToast } from "@/lib/hooks/use-toast";
@@ -13,11 +13,7 @@ export default function NurseDashboardPage() {
   const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
 
-  useEffect(() => {
-    loadRecords();
-  }, []);
-
-  const loadRecords = async () => {
+  const loadRecords = useCallback(async () => {
     try {
       setIsLoading(true);
       const supabase = createClient();
@@ -40,7 +36,11 @@ export default function NurseDashboardPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [toast]);
+
+  useEffect(() => {
+    loadRecords();
+  }, [loadRecords]);
 
   const handleValidate = async (
     id: string,
@@ -88,8 +88,8 @@ export default function NurseDashboardPage() {
           description: overrideLevel
             ? `Caso validado con nivel ESI ${overrideLevel}`
             : nurseLevel
-            ? `Caso validado con nivel ESI ${nurseLevel}`
-            : "Caso validado correctamente",
+              ? `Caso validado con nivel ESI ${nurseLevel}`
+              : "Caso validado correctamente",
         });
       }
 

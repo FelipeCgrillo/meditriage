@@ -743,7 +743,7 @@ export default function ResultadosPage() {
                             <div className="text-3xl font-bold text-blue-600 mb-1">
                                 {metrics.validatedRecords > 0 ? `${(metrics.criticalMetrics.npv * 100).toFixed(1)}%` : '—'}
                             </div>
-                            <p className="text-xs text-gray-600">Confianza "no grave"</p>
+                            <p className="text-xs text-gray-600">Confianza &quot;no grave&quot;</p>
                             <p className="text-xs text-gray-500 mt-1">TN: {metrics.criticalMetrics.TN} / {metrics.criticalMetrics.TN + metrics.criticalMetrics.FN}</p>
                         </div>
                         <div className="bg-white rounded-xl p-4 border-2 border-purple-200 shadow-sm">
