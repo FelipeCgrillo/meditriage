@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect } from 'react';
-import { Button } from './ui/button';
+import { Button } from '@/components/ui/Button';
 
 interface SuccessScreenProps {
     anonymousCode: string;
