@@ -1,6 +1,17 @@
 import type { TriageResult } from '../ai/schemas';
 
 /**
+ * AI Response structure stored in ai_response JSONB field
+ */
+export interface AIResponse {
+    reasoning?: string;
+    critical_signs?: string[];
+    suggested_specialty?: string;
+    confidence?: number;
+    esi_level?: number;
+}
+
+/**
  * Database schema types
  */
 export type Json =
@@ -42,9 +53,11 @@ export interface ClinicalRecord {
     symptoms_text: string;
     symptoms_voice_url: string | null;
     ai_response: Json; // Using Json type for JSONB
-    esi_level: number;
+    esi_level: number; // AI-generated ESI classification (what the AI suggested)
     nurse_validated: boolean;
-    nurse_override_level: number | null; // Nurse's independent ESI classification
+    nurse_esi_level: number | null; // Nurse's independent ESI classification BEFORE seeing AI (critical for Kappa)
+    nurse_override_level: number | null; // Final ESI level if nurse changes opinion AFTER seeing AI
+    feedback_enfermero: string | null; // Nurse's textual feedback on ESI classification (critical thesis requirement)
     nurse_id: string | null;
     fhir_bundle: Json | null; // Using Json type for JSONB
     created_at: string;
@@ -79,7 +92,9 @@ export interface ClinicalRecordInsert {
  */
 export interface ClinicalRecordUpdate {
     nurse_validated?: boolean;
-    nurse_override_level?: number; // Nurse's independent ESI classification
+    nurse_esi_level?: number | null; // Nurse's independent ESI classification BEFORE seeing AI
+    nurse_override_level?: number | null; // Final ESI level if nurse changes opinion AFTER seeing AI
+    feedback_enfermero?: string | null; // Nurse's textual feedback on ESI classification
     nurse_id?: string;
     esi_level?: number;
     updated_at?: string;

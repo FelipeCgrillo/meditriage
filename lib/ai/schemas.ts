@@ -73,6 +73,13 @@ export const TriageResponseSchema = z.object({
         .string()
         .optional()
         .describe("Explanation of why more information is needed. Required when status=needs_info. Example: 'Input vago sin síntomas físicos'"),
+
+    // Quick-reply options for conversational flow
+    suggested_options: z
+        .array(z.string())
+        .max(5)
+        .optional()
+        .describe("Array of quick-reply options when status=needs_info. Max 5 options. Example: ['Dolor fuerte', 'Dolor moderado', 'Dolor leve']"),
 });
 
 export type TriageResponse = z.infer<typeof TriageResponseSchema>;
