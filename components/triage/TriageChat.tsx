@@ -8,7 +8,7 @@ import {
   Mic, 
   CheckCircle2
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/lib/hooks/use-toast";
