@@ -36,31 +36,18 @@ function ResultadosLoginForm() {
                 return;
             }
 
-            // Verify user has researcher or admin role
-            const { data: profile, error: profileError } = await supabase
-                .from('user_profiles')
-                .select('role')
-                .eq('id', data.user.id)
-                .single();
+            // ✅ Don't check profile here - let the destination page handle authorization
+            // The AuthProvider will load the profile after the redirect
+            // This prevents the stuck button caused by attempting to query RLS-protected tables
+            // before the client-side session is fully established
 
-            if (profileError || !profile) {
-                setError('Tu cuenta no tiene un perfil configurado. Contacta al administrador.');
-                await supabase.auth.signOut();
-                setLoading(false);
-                return;
-            }
-
-            if (profile.role !== 'researcher' && profile.role !== 'admin') {
-                setError('No tienes permisos para acceder al panel de resultados.');
-                await supabase.auth.signOut();
-                setLoading(false);
-                return;
-            }
+            console.log('[Login] Authentication successful, redirecting to:', redirectTo);
 
             // Success - redirect to results dashboard
-            router.push(redirectTo);
-            router.refresh();
+            // Use window.location for a hard redirect to ensure the page reloads with the new session
+            window.location.href = redirectTo;
         } catch (err) {
+            console.error('Login error:', err);
             setError('Error inesperado. Intenta nuevamente.');
             setLoading(false);
         }

@@ -14,11 +14,24 @@ interface ClinicalRecordForAnalysis {
     id: string;
     anonymous_code: string | null;
     esi_level: number; // AI ESI level
-    nurse_override_level: number | null; // Nurse's independent classification
+    nurse_esi_level: number | null; // Nurse's independent classification BEFORE seeing AI (Gold Standard)
+    nurse_override_level: number | null; // Final level if nurse changed opinion AFTER seeing AI
     patient_gender: string | null;
     patient_age_group: string | null;
     consent_eligible: boolean | null;
     nurse_validated: boolean;
+}
+
+interface CriticalCaseMetrics {
+    sensitivity: number;  // TP / (TP + FN) - Capacidad de detectar casos graves
+    specificity: number;  // TN / (TN + FP) - Capacidad de descartar no graves
+    npv: number;          // TN / (TN + FN) - Valor Predictivo Negativo
+    ppv: number;          // TP / (TP + FP) - Valor Predictivo Positivo
+    TP: number;
+    FP: number;
+    FN: number;           // ⚠️ CASOS PELIGROSOS: IA dice no grave, pero enfermera dice grave
+    TN: number;
+    criticalSubTriageRate: number; // FN / (TP + FN) * 100 - Tasa específica de sub-triage en graves
 }
 
 interface StudyMetrics {
@@ -31,6 +44,7 @@ interface StudyMetrics {
     confusionMatrix: number[][];
     accuracyByGender: { male: number; female: number; unknown: number; maleN: number; femaleN: number; unknownN: number };
     accuracyByAgeGroup: { pediatric: number; adult: number; geriatric: number; unknown: number; pediatricN: number; adultN: number; geriatricN: number; unknownN: number };
+    criticalMetrics: CriticalCaseMetrics; // ⭐ NUEVO: Métricas de seguridad clínica
 }
 
 // =============================================================================
@@ -38,8 +52,10 @@ interface StudyMetrics {
 // =============================================================================
 
 function calculateStudyMetrics(records: ClinicalRecordForAnalysis[]): StudyMetrics {
-    // Filter only validated records with nurse override
-    const validRecords = records.filter(r => r.nurse_validated && r.nurse_override_level !== null);
+    // 🔥 CORRECCIÓN CRÍTICA: Filter only validated records with nurse_esi_level (Gold Standard)
+    // ANTES (INCORRECTO): r.nurse_override_level !== null
+    // AHORA (CORRECTO): r.nurse_esi_level !== null
+    const validRecords = records.filter(r => r.nurse_validated && r.nurse_esi_level !== null);
 
     const n = validRecords.length;
 
@@ -66,7 +82,10 @@ function calculateStudyMetrics(records: ClinicalRecordForAnalysis[]): StudyMetri
     };
 
     for (const record of validRecords) {
-        const nurseEsi = record.nurse_override_level!;
+        // 🔥 CORRECCIÓN CRÍTICA: Usar nurse_esi_level como Gold Standard (clasificación independiente)
+        // ANTES (INCORRECTO): const nurseEsi = record.nurse_override_level!;
+        // AHORA (CORRECTO): const nurseEsi = record.nurse_esi_level!;
+        const nurseEsi = record.nurse_esi_level!; // ⭐ Gold Standard para Kappa
         const aiEsi = record.esi_level;
 
         const nurseIdx = nurseEsi - 1;
@@ -110,6 +129,9 @@ function calculateStudyMetrics(records: ClinicalRecordForAnalysis[]): StudyMetri
     // Calculate Cohen's Kappa
     const kappa = calculateCohenKappa(matrix, n);
 
+    // ⭐ NUEVO: Calculate Critical Case Metrics (ESI 1-2)
+    const criticalMetrics = calculateCriticalCaseMetrics(validRecords);
+
     // Calculate accuracy percentages
     const safePercent = (correct: number, total: number) => total > 0 ? (correct / total) * 100 : 0;
 
@@ -138,7 +160,68 @@ function calculateStudyMetrics(records: ClinicalRecordForAnalysis[]): StudyMetri
             adultN: ageStats.Adult.total,
             geriatricN: ageStats.Geriatric.total,
             unknownN: ageStats.unknown.total
+        },
+        criticalMetrics // ⭐ NUEVO: Métricas de seguridad clínica
+    };
+}
+
+// =============================================================================
+// ⭐ NUEVO: CRITICAL CASE METRICS (ESI 1-2) - SEGURIDAD CLÍNICA
+// =============================================================================
+// Basado en: supabase/test_nurse_esi_level.sql líneas 116-137
+// Objetivo: Validar que la IA NO subestima casos graves (Hipótesis de Tesis)
+
+function calculateCriticalCaseMetrics(records: ClinicalRecordForAnalysis[]): CriticalCaseMetrics {
+    let TP = 0; // IA=Crítico (≤2), Enfermera=Crítico (≤2) → Verdadero Positivo
+    let FP = 0; // IA=Crítico (≤2), Enfermera=NoCrítico (≥3) → Falso Positivo (sobre-triage)
+    let FN = 0; // IA=NoCrítico (≥3), Enfermera=Crítico (≤2) → Falso Negativo ⚠️ PELIGROSO
+    let TN = 0; // IA=NoCrítico (≥3), Enfermera=NoCrítico (≥3) → Verdadero Negativo
+
+    for (const record of records) {
+        const aiCritical = record.esi_level <= 2;
+        const nurseCritical = record.nurse_esi_level! <= 2; // Gold Standard
+
+        if (aiCritical && nurseCritical) {
+            TP++; // ✅ IA detectó correctamente caso grave
+        } else if (aiCritical && !nurseCritical) {
+            FP++; // ⚠️ IA sobre-clasificó (no tan grave)
+        } else if (!aiCritical && nurseCritical) {
+            FN++; // 🚨 IA PERDIÓ CASO GRAVE - CRÍTICO PARA SEGURIDAD
+        } else {
+            TN++; // ✅ IA descartó correctamente caso no grave
         }
+    }
+
+    const totalCritical = TP + FN; // Total de casos graves según enfermera
+
+    // Evitar división por cero
+    const safeDivide = (numerator: number, denominator: number) =>
+        denominator > 0 ? numerator / denominator : 0;
+
+    return {
+        TP,
+        FP,
+        FN,
+        TN,
+        // Sensibilidad: Capacidad de detectar casos graves
+        // "De todos los casos realmente graves, ¿cuántos detecta la IA?"
+        sensitivity: safeDivide(TP, TP + FN),
+
+        // Especificidad: Capacidad de descartar casos no graves
+        // "De todos los casos realmente no graves, ¿cuántos descarta la IA?"
+        specificity: safeDivide(TN, TN + FP),
+
+        // Valor Predictivo Negativo (VPN): Confianza cuando la IA dice "no crítico"
+        // "Cuando la IA dice no grave, ¿qué tan seguro estamos?"
+        npv: safeDivide(TN, TN + FN),
+
+        // Valor Predictivo Positivo (VPP): Confianza cuando la IA dice "crítico"
+        // "Cuando la IA dice grave, ¿qué tan seguro estamos?"
+        ppv: safeDivide(TP, TP + FP),
+
+        // Tasa de sub-triage específica en casos graves (objetivo: <5%)
+        // "De todos los casos graves, ¿cuántos se perdieron?"
+        criticalSubTriageRate: safeDivide(FN, totalCritical) * 100
     };
 }
 
@@ -165,6 +248,7 @@ function calculateCohenKappa(matrix: number[][], n: number): number {
     }
 
     // Kappa = (Po - Pe) / (1 - Pe)
+    // Referencia: Cohen, J. (1960). "A coefficient of agreement for nominal scales"
     if (pe === 1) return 1;
     return (po - pe) / (1 - pe);
 }
@@ -410,28 +494,61 @@ export default function ResultadosPage() {
         setError(null);
 
         try {
+            console.log('Fetching clinical records from Supabase...');
             const { data, error: fetchError } = await supabase
                 .from('clinical_records')
-                .select('id, anonymous_code, esi_level, nurse_override_level, patient_gender, patient_age_group, consent_eligible, nurse_validated')
+                // 🔥 CORRECCIÓN CRÍTICA: Agregar nurse_esi_level al query
+                .select('id, anonymous_code, esi_level, nurse_esi_level, nurse_override_level, patient_gender, patient_age_group, consent_eligible, nurse_validated')
                 .order('created_at', { ascending: false });
 
-            if (fetchError) throw fetchError;
+            if (fetchError) {
+                console.error('Supabase fetch error:', fetchError);
+                throw fetchError;
+            }
 
+            console.log(`Successfully fetched ${data?.length || 0} clinical records`);
             setRecords(data || []);
         } catch (err) {
             console.error('Error fetching clinical records:', err);
-            setError(err instanceof Error ? err.message : 'Error desconocido');
+            setError(err instanceof Error ? err.message : 'Error desconocido al cargar datos');
         } finally {
             setLoading(false);
         }
     };
 
     useEffect(() => {
-        // Only fetch data after auth is ready to avoid RLS issues
+        // Wait for auth to be ready, then fetch data
+        console.log('Auth state:', { authLoading, hasProfile: !!profile, role: profile?.role });
+
         if (!authLoading) {
-            fetchData();
+            // Auth is ready, proceed with authorization check
+            if (profile) {
+                // Check if user has permission to access this page
+                if (profile.role !== 'researcher' && profile.role !== 'admin') {
+                    console.warn('[Resultados] User does not have permission. Role:', profile.role);
+                    setError('No tienes permisos para acceder a esta página. Se requiere rol de investigador o administrador.');
+                    setLoading(false);
+                    // Redirect to login after showing error briefly
+                    setTimeout(() => {
+                        window.location.href = '/login/resultados';
+                    }, 2000);
+                    return;
+                }
+
+                console.log('Profile loaded, fetching data for user:', profile.email, 'Role:', profile.role);
+                fetchData();
+            } else {
+                // If we're not loading auth but there's no profile, show an error
+                console.error('No profile found after auth loading completed');
+                setError('No se pudo cargar tu perfil de usuario. Redirigiendo al login...');
+                setLoading(false);
+                // Redirect to login
+                setTimeout(() => {
+                    window.location.href = '/login/resultados';
+                }, 2000);
+            }
         }
-    }, [authLoading]);
+    }, [authLoading, profile]);
 
     // Filter records by eligibility if toggle is on
     const filteredRecords = useMemo(() => {
@@ -591,6 +708,80 @@ export default function ResultadosPage() {
                         badge="Riesgo Clínico"
                         subtext="IA subestima gravedad"
                     />
+                </section>
+
+                {/* ⭐ NUEVO: KPIs de Seguridad Clínica (Casos Graves ESI 1-2) */}
+                <section className="bg-gradient-to-br from-red-50 to-orange-50 border-2 border-red-200 rounded-2xl p-6 shadow-md">
+                    <div className="flex items-center gap-3 mb-4">
+                        <div className="p-2 bg-red-100 rounded-lg">
+                            <svg className="w-6 h-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                            </svg>
+                        </div>
+                        <div>
+                            <h2 className="text-xl font-bold text-red-900">Métricas de Seguridad Clínica</h2>
+                            <p className="text-sm text-red-700">Rendimiento en Casos Graves (ESI 1-2)</p>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <div className="bg-white rounded-xl p-4 border-2 border-emerald-200 shadow-sm">
+                            <div className="flex justify-between items-start mb-2">
+                                <span className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Sensibilidad</span>
+                                <span className="text-2xl">🎯</span>
+                            </div>
+                            <div className="text-3xl font-bold text-emerald-600 mb-1">
+                                {metrics.validatedRecords > 0 ? `${(metrics.criticalMetrics.sensitivity * 100).toFixed(1)}%` : '—'}
+                            </div>
+                            <p className="text-xs text-gray-600">Detecta casos graves</p>
+                            <p className="text-xs text-gray-500 mt-1">TP: {metrics.criticalMetrics.TP} / {metrics.criticalMetrics.TP + metrics.criticalMetrics.FN}</p>
+                        </div>
+                        <div className="bg-white rounded-xl p-4 border-2 border-blue-200 shadow-sm">
+                            <div className="flex justify-between items-start mb-2">
+                                <span className="text-sm font-semibold text-gray-700 uppercase tracking-wide">VPN</span>
+                                <span className="text-2xl">✅</span>
+                            </div>
+                            <div className="text-3xl font-bold text-blue-600 mb-1">
+                                {metrics.validatedRecords > 0 ? `${(metrics.criticalMetrics.npv * 100).toFixed(1)}%` : '—'}
+                            </div>
+                            <p className="text-xs text-gray-600">Confianza "no grave"</p>
+                            <p className="text-xs text-gray-500 mt-1">TN: {metrics.criticalMetrics.TN} / {metrics.criticalMetrics.TN + metrics.criticalMetrics.FN}</p>
+                        </div>
+                        <div className="bg-white rounded-xl p-4 border-2 border-purple-200 shadow-sm">
+                            <div className="flex justify-between items-start mb-2">
+                                <span className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Especificidad</span>
+                                <span className="text-2xl">🔍</span>
+                            </div>
+                            <div className="text-3xl font-bold text-purple-600 mb-1">
+                                {metrics.validatedRecords > 0 ? `${(metrics.criticalMetrics.specificity * 100).toFixed(1)}%` : '—'}
+                            </div>
+                            <p className="text-xs text-gray-600">Descarta no graves</p>
+                            <p className="text-xs text-gray-500 mt-1">TN: {metrics.criticalMetrics.TN} / {metrics.criticalMetrics.TN + metrics.criticalMetrics.FP}</p>
+                        </div>
+                        <div className="bg-white rounded-xl p-4 border-2 border-red-300 shadow-sm">
+                            <div className="flex justify-between items-start mb-2">
+                                <span className="text-sm font-semibold text-gray-700 uppercase tracking-wide">FN Graves</span>
+                                <span className="text-2xl">🚨</span>
+                            </div>
+                            <div className="text-3xl font-bold text-red-600 mb-1">
+                                {metrics.criticalMetrics.FN}
+                            </div>
+                            <p className="text-xs text-gray-600">Casos graves perdidos</p>
+                            <p className="text-xs text-gray-500 mt-1">Tasa: {metrics.criticalMetrics.criticalSubTriageRate.toFixed(1)}%</p>
+                        </div>
+                    </div>
+                    <div className="mt-4 bg-white rounded-lg p-3 border border-gray-200">
+                        <div className="flex items-start gap-2 text-xs text-gray-700">
+                            <span className="text-lg flex-shrink-0">💡</span>
+                            <div>
+                                <strong>Interpretación:</strong>
+                                <span className="ml-1">
+                                    Sensibilidad {(metrics.criticalMetrics.sensitivity * 100).toFixed(0)}% significa que de cada 100 casos realmente graves,
+                                    la IA detecta {(metrics.criticalMetrics.sensitivity * 100).toFixed(0)}.
+                                    Falsos Negativos (FN={metrics.criticalMetrics.FN}) son casos graves que la IA clasificó como no graves.
+                                </span>
+                            </div>
+                        </div>
+                    </div>
                 </section>
 
                 {/* MAIN CONTENT */}
