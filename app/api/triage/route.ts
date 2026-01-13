@@ -3,6 +3,7 @@ import { generateObject } from 'ai';
 import { aiModel, validateAIConfig } from '@/lib/ai/config';
 import { TriageResponseSchema, TriageInputSchema } from '@/lib/ai/schemas';
 import { ESI_SYSTEM_PROMPT, FALLBACK_MESSAGE } from '@/lib/ai/prompts';
+import { sanitizeForAI } from '@/lib/utils/pii-filter';
 
 /**
  * POST /api/triage
@@ -42,6 +43,10 @@ export async function POST(request: NextRequest) {
 
         const { symptoms } = validationResult.data;
 
+        // ==================== PRIVACY: PII SANITIZATION ====================
+        // Sanitize symptoms before sending to AI (Ley 19.628 compliance)
+        const sanitizedSymptoms = sanitizeForAI(symptoms);
+
         // Extract messages array if present (for conversational flow)
         interface ChatMessage {
             role: 'user' | 'assistant';
@@ -52,7 +57,7 @@ export async function POST(request: NextRequest) {
         // ==================== CONTROL DE FLUJO: LÍMITE DE TURNOS ====================
         // Conteo de preguntas de seguimiento del usuario (excluyendo flujo de consentimiento)
         const CONSENT_KEYWORDS = [
-            'sí, acepto', 'si, acepto', 'acepto', 
+            'sí, acepto', 'si, acepto', 'acepto',
             'masculino', 'femenino', 'otro',
             'adulto', 'pediátrico', 'adulto mayor',
             'menor de 1 año', '1-5 años', '6-12 años', '13-17 años',
@@ -98,7 +103,7 @@ HISTORIAL DE CONVERSACIÓN:
 ${conversationHistory}
 
 ÚLTIMA RESPUESTA DEL PACIENTE:
-${symptoms}
+${sanitizedSymptoms}
 
 🚨 INSTRUCCIÓN OBLIGATORIA: Debes clasificar al paciente AHORA con la información disponible. NO PUEDES hacer más preguntas de seguimiento. Utiliza el protocolo ESI y, en caso de duda, aplica el principio de precaución (clasificación conservadora priorizando seguridad del paciente).
 
@@ -131,7 +136,7 @@ HISTORIAL DE CONVERSACIÓN:
 ${conversationHistory}
 
 NUEVA RESPUESTA DEL PACIENTE:
-${symptoms}
+${sanitizedSymptoms}
 
 Ahora con esta información adicional, evalúa si tienes suficiente contexto para clasificar con el protocolo ESI, o si necesitas más aclaraciones.
 
@@ -148,7 +153,7 @@ Recuerda: Si el input es vago (sin síntomas físicos específicos, ubicación, 
 ⏱️ NOTA: Dispones de máximo ${MAX_FOLLOW_UP_QUESTIONS} preguntas de seguimiento antes de que debas clasificar obligatoriamente.
 
 Síntomas reportados:
-${symptoms}
+${sanitizedSymptoms}
 
 Proporciona tu evaluación estructurada siguiendo el protocolo ESI.`;
         }

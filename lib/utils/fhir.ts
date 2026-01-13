@@ -4,7 +4,65 @@ import type { FHIRRiskAssessment } from '../supabase/types';
 /**
  * FHIR Resource Builder Utilities
  * For HL7 FHIR RiskAssessment generation
+ * 
+ * References:
+ * - OE1 Tabla 5: Variables de Síntomas Principales
+ * - OE2 Tabla 4: Mapeo de Síntomas a SNOMED CT
  */
+
+/**
+ * SNOMED CT Mappings for common symptoms
+ * Based on OE2 Table 4 (Mapeo de Síntomas a SNOMED CT)
+ */
+export const SNOMED_SYMPTOM_MAPPINGS: Record<string, { code: string; display: string }> = {
+    // Primary symptoms from OE1
+    'dolor de pecho': { code: '29857009', display: 'Chest pain' },
+    'dolor torácico': { code: '29857009', display: 'Chest pain' },
+    'dificultad para respirar': { code: '267036007', display: 'Dyspnea' },
+    'disnea': { code: '267036007', display: 'Dyspnea' },
+    'dolor abdominal': { code: '21522001', display: 'Abdominal pain' },
+    'dolor de cabeza': { code: '25064002', display: 'Headache' },
+    'cefalea': { code: '25064002', display: 'Headache' },
+    'fiebre': { code: '386661006', display: 'Fever' },
+    'confusión': { code: '40917007', display: 'Confusion' },
+    'sangrado': { code: '131148009', display: 'Hemorrhage' },
+    'hemorragia': { code: '131148009', display: 'Hemorrhage' },
+    'náuseas': { code: '422587007', display: 'Nausea' },
+    'vómitos': { code: '422400008', display: 'Vomiting' },
+    'mareos': { code: '404640003', display: 'Dizziness' },
+    'debilidad': { code: '13791008', display: 'Asthenia' },
+    'palpitaciones': { code: '80313002', display: 'Palpitations' },
+    'desmayo': { code: '271594007', display: 'Syncope' },
+    'síncope': { code: '271594007', display: 'Syncope' },
+    'convulsiones': { code: '91175000', display: 'Seizure' },
+    'tos': { code: '49727002', display: 'Cough' },
+    'ideación suicida': { code: '6471006', display: 'Suicidal ideation' },
+    'trauma': { code: '417746004', display: 'Trauma' },
+};
+
+/**
+ * Extract SNOMED codes from critical signs array
+ */
+export function extractSNOMEDCodes(criticalSigns: string[]): Array<{ code: string; display: string; term: string }> {
+    const codes: Array<{ code: string; display: string; term: string }> = [];
+
+    for (const sign of criticalSigns) {
+        const normalizedSign = sign.toLowerCase().trim();
+
+        for (const [key, value] of Object.entries(SNOMED_SYMPTOM_MAPPINGS)) {
+            if (normalizedSign.includes(key)) {
+                codes.push({
+                    code: value.code,
+                    display: value.display,
+                    term: sign,
+                });
+                break;
+            }
+        }
+    }
+
+    return codes;
+}
 
 /**
  * Map ESI level to FHIR qualitative risk coding
