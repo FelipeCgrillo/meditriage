@@ -19,69 +19,88 @@ export default function PacientePage() {
     const [triageResult, setTriageResult] = useState<TriageResult | null>(null);
     const [anonymousCode, setAnonymousCode] = useState<string>('');
 
-    const handleTriageComplete = async (messages: Message[], finalSymptoms: string, demographics: DemographicData) => {
+    const handleTriageComplete = async (messages: Message[], finalSymptoms: string, demographics: DemographicData, triageData?: TriageResult) => {
         try {
+            console.log('[PacientePage] handleTriageComplete called', {
+                messagesCount: messages.length,
+                finalSymptoms: finalSymptoms.substring(0, 50),
+                demographics,
+                triageData: triageData ? 'provided' : 'not provided'
+            });
+
             // Convert messages to conversation history format
             const conversationHistory: ConversationMessage[] = messages.map(msg => ({
                 role: msg.role === 'user' ? 'patient' : 'ai',
                 content: msg.content
             }));
 
-            // Call triage API with the final conversation to get classification
-            const response = await fetch('/api/triage', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    symptoms: finalSymptoms,
-                    messages: messages
-                }),
-            });
+            let result: TriageResult;
 
-            if (!response.ok) {
-                throw new Error('Error al procesar la clasificación final');
-            }
+            // If triageData is provided, use it directly; otherwise call API
+            if (triageData && triageData.esi_level) {
+                console.log('[PacientePage] Using provided triage result');
+                result = triageData;
+            } else {
+                // Call triage API with the final conversation to get classification
+                console.log('[PacientePage] Calling API for triage result');
+                const response = await fetch('/api/triage', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        symptoms: finalSymptoms,
+                        messages: messages
+                    }),
+                });
 
-            const data = await response.json();
-
-            if (data.success && data.data) {
-                const result = data.data as TriageResult;
-                setTriageResult(result);
-
-                // Generate anonymous patient code
-                const patientCode = generateAnonymousCode();
-
-                // Save to database with anonymous code and demographic data
-                const { data: dbData, error } = await supabase
-                    .from('clinical_records')
-                    .insert({
-                        patient_consent: true,
-                        symptoms_text: finalSymptoms,
-                        ai_response: result as any,
-                        esi_level: result.esi_level,
-                        nurse_validated: false,
-                        anonymous_code: patientCode,
-                        patient_gender: demographics.gender || null,
-                        patient_age_group: demographics.ageGroup || null,
-                        conversation_history: conversationHistory,
-                    } as any)
-                    .select('anonymous_code')
-                    .single();
-
-                if (error) {
-                    console.error('Error saving to database:', error);
-                    setAnonymousCode(patientCode);
-                } else {
-                    setAnonymousCode(dbData?.anonymous_code || patientCode);
+                if (!response.ok) {
+                    throw new Error('Error al procesar la clasificación final');
                 }
 
-                setCurrentStep('success');
-            } else {
-                throw new Error('Respuesta inválida del servidor');
+                const data = await response.json();
+
+                if (data.success && data.data && data.data.esi_level) {
+                    result = data.data as TriageResult;
+                } else {
+                    throw new Error('Respuesta inválida del servidor');
+                }
             }
+
+            setTriageResult(result);
+
+            // Generate anonymous patient code
+            const patientCode = generateAnonymousCode();
+
+            // Save to database with anonymous code and demographic data
+            console.log('[PacientePage] Saving to database...');
+            const { data: dbData, error } = await supabase
+                .from('clinical_records')
+                .insert({
+                    patient_consent: true,
+                    symptoms_text: finalSymptoms,
+                    ai_response: result as any,
+                    esi_level: result.esi_level,
+                    nurse_validated: false,
+                    anonymous_code: patientCode,
+                    patient_gender: demographics.gender || null,
+                    patient_age_group: demographics.ageGroup || null,
+                    conversation_history: conversationHistory,
+                } as any)
+                .select('anonymous_code')
+                .single();
+
+            if (error) {
+                console.error('[PacientePage] Error saving to database:', error);
+                setAnonymousCode(patientCode);
+            } else {
+                console.log('[PacientePage] Saved successfully:', dbData);
+                setAnonymousCode(dbData?.anonymous_code || patientCode);
+            }
+
+            setCurrentStep('success');
         } catch (error) {
-            console.error('Error completing triage:', error);
+            console.error('[PacientePage] Error completing triage:', error);
             // Optionally show error to user
             alert('Ocurrió un error al completar la clasificación. Por favor, intente nuevamente.');
         }

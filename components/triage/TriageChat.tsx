@@ -29,7 +29,7 @@ export interface DemographicData {
 }
 
 interface TriageChatProps {
-  onComplete: (messages: Message[], finalSymptoms: string, demographics: DemographicData) => Promise<void>;
+  onComplete: (messages: Message[], finalSymptoms: string, demographics: DemographicData, triageData?: any) => Promise<void>;
 }
 
 const MIN_INPUT_LENGTH = 3;
@@ -232,13 +232,14 @@ Antes de comenzar, es importante que sepa:
             options: aiResponse.suggested_options
           });
         } else if (aiResponse.status === 'completed') {
-          // Classification complete - finalize
+          // Classification complete - finalize with triage data
           const symptomsSummary = updatedMessages
             .filter(m => m.role === 'user')
             .map(m => m.content)
             .join(' | ');
 
-          await onComplete(updatedMessages, symptomsSummary, demographics);
+          console.log('[TriageChat] Calling onComplete with triage data:', aiResponse);
+          await onComplete(updatedMessages, symptomsSummary, demographics, aiResponse);
         } else {
           // Unexpected status - treat as needs_info with a default message
           console.warn('[TriageChat] Unexpected status:', aiResponse.status);
