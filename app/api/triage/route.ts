@@ -176,7 +176,10 @@ Proporciona tu evaluación estructurada siguiendo el protocolo ESI.`;
         });
 
     } catch (error) {
-        console.error('Triage API Error:', error);
+        // Safe error logging - avoid circular reference issues with AI SDK errors
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        const errorName = error instanceof Error ? error.name : 'UnknownError';
+        console.error(`Triage API Error [${errorName}]:`, errorMessage);
 
         // Return fallback mode on any error
         // This ensures the system never blocks nurse workflow
