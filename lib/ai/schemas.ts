@@ -54,11 +54,8 @@ export const TriageResponseSchema = z.object({
         .describe('Emergency Severity Index Level (1=Critical, 5=Non-Urgent). Required when status=completed, null when status=needs_info'),
 
     critical_signs: z
-        .union([
-            z.array(z.string()),
-            z.string().transform(val => [val]),
-            z.null()
-        ])
+        .array(z.string())
+        .nullable()
         .optional()
         .describe('Array of identified critical signs or symptoms. Required when status=completed, null when status=needs_info'),
 
