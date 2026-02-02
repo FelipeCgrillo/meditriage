@@ -214,11 +214,15 @@ Antes de comenzar, es importante que sepa:
 
       const data = await response.json();
 
+      // DEBUG: Log the response to understand what's happening
+      console.log('[TriageChat] API Response:', JSON.stringify(data, null, 2));
+
       // Small delay to simulate typing
       await new Promise(resolve => setTimeout(resolve, 400));
 
       if (data.success && data.data) {
         const aiResponse = data.data;
+        console.log('[TriageChat] AI Response status:', aiResponse.status);
 
         if (aiResponse.status === 'needs_info') {
           // Continue conversation with follow-up question
@@ -235,6 +239,14 @@ Antes de comenzar, es importante que sepa:
             .join(' | ');
 
           await onComplete(updatedMessages, symptomsSummary, demographics);
+        } else {
+          // Unexpected status - treat as needs_info with a default message
+          console.warn('[TriageChat] Unexpected status:', aiResponse.status);
+          addMessage({
+            role: 'assistant',
+            content: aiResponse.follow_up_question || aiResponse.reasoning || '¿Puede proporcionar más detalles sobre sus síntomas?',
+            options: aiResponse.suggested_options
+          });
         }
       } else if (data.fallback) {
         // Fallback mode - complete immediately
@@ -251,6 +263,7 @@ Antes de comenzar, es importante que sepa:
 
         await onComplete(updatedMessages, symptomsSummary, demographics);
       } else {
+        console.error('[TriageChat] Invalid response structure:', data);
         throw new Error("Respuesta inválida del servidor");
       }
 
