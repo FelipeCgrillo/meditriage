@@ -1,11 +1,11 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { 
-  Send, 
-  Bot, 
-  Loader2, 
-  Mic, 
+import {
+  Send,
+  Bot,
+  Loader2,
+  Mic,
   CheckCircle2
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
@@ -50,7 +50,17 @@ export function TriageChat({ onComplete }: TriageChatProps) {
     {
       id: '1',
       role: 'assistant',
-      content: 'Hola. Soy el asistente virtual del CESFAM. Este sistema usa IA para pre-clasificar su urgencia bajo supervisión de enfermería.\n\n¿Autoriza el uso de sus datos para la evaluación?',
+      content: `Bienvenido/a al Sistema de Auto-Triage del CESFAM.
+
+Antes de comenzar, es importante que sepa:
+
+• Este sistema usa Inteligencia Artificial para analizar sus síntomas y sugerir una clasificación de urgencia.
+• Un profesional de enfermería validará la clasificación antes de su atención.
+• Sus datos serán tratados con confidencialidad según la Ley 19.628.
+• Este sistema NO reemplaza la evaluación médica profesional.
+• Su participación es voluntaria y puede retirarse en cualquier momento.
+
+¿Autoriza el uso de sus datos para la evaluación?`,
       options: ['Sí, autorizo', 'No autorizo'],
       timestamp: new Date()
     }
@@ -61,7 +71,7 @@ export function TriageChat({ onComplete }: TriageChatProps) {
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
-  
+
   // Voice input integration
   const {
     isListening,
@@ -109,7 +119,7 @@ export function TriageChat({ onComplete }: TriageChatProps) {
   const handleConsentResponse = async (response: string) => {
     setIsTyping(true);
     await new Promise(resolve => setTimeout(resolve, 350));
-    
+
     if (response === 'Sí, autorizo') {
       setHasConsented(true);
       setConsentStep('gender');
@@ -130,17 +140,17 @@ export function TriageChat({ onComplete }: TriageChatProps) {
   const handleGenderResponse = async (gender: string) => {
     setIsTyping(true);
     await new Promise(resolve => setTimeout(resolve, 350));
-    
+
     const genderMap: { [key: string]: string } = {
       'Masculino': 'M',
       'Femenino': 'F',
       'Otro': 'Other',
       'Prefiero no decir': 'Prefer not to say'
     };
-    
+
     setDemographics(prev => ({ ...prev, gender: genderMap[gender] || null }));
     setConsentStep('age');
-    
+
     addMessage({
       role: 'assistant',
       content: 'Indique su grupo etario:',
@@ -152,17 +162,17 @@ export function TriageChat({ onComplete }: TriageChatProps) {
   const handleAgeResponse = async (ageGroup: string) => {
     setIsTyping(true);
     await new Promise(resolve => setTimeout(resolve, 450));
-    
+
     const ageMap: { [key: string]: string } = {
       'Pediátrico (0-17 años)': 'Pediatric',
       'Adulto (18-64 años)': 'Adult',
       'Geriátrico (65+ años)': 'Geriatric',
       'Prefiero no decir': null as any
     };
-    
+
     setDemographics(prev => ({ ...prev, ageGroup: ageMap[ageGroup] || null }));
     setConsentStep('completed');
-    
+
     addMessage({
       role: 'assistant',
       content: '¿Cuál es el motivo principal de su consulta? (Describa sus síntomas brevemente).'
@@ -174,7 +184,7 @@ export function TriageChat({ onComplete }: TriageChatProps) {
   const callTriageAPI = async (userMessage: string) => {
     try {
       setIsTyping(true);
-      
+
       // Add user message first
       const userMsg: Message = {
         id: Date.now().toString(),
@@ -182,7 +192,7 @@ export function TriageChat({ onComplete }: TriageChatProps) {
         content: userMessage,
         timestamp: new Date()
       };
-      
+
       const updatedMessages = [...messages, userMsg];
       setMessages(updatedMessages);
 
@@ -223,7 +233,7 @@ export function TriageChat({ onComplete }: TriageChatProps) {
             .filter(m => m.role === 'user')
             .map(m => m.content)
             .join(' | ');
-          
+
           await onComplete(updatedMessages, symptomsSummary, demographics);
         }
       } else if (data.fallback) {
@@ -233,12 +243,12 @@ export function TriageChat({ onComplete }: TriageChatProps) {
           description: "La clasificación será manual.",
           variant: "default",
         });
-        
+
         const symptomsSummary = updatedMessages
           .filter(m => m.role === 'user')
           .map(m => m.content)
           .join(' | ');
-        
+
         await onComplete(updatedMessages, symptomsSummary, demographics);
       } else {
         throw new Error("Respuesta inválida del servidor");
@@ -290,12 +300,12 @@ export function TriageChat({ onComplete }: TriageChatProps) {
         title: "Conversación muy extensa",
         description: "Finalizando evaluación...",
       });
-      
+
       const symptomsSummary = messages
         .filter(m => m.role === 'user')
         .map(m => m.content)
         .join(' | ');
-      
+
       await onComplete(messages, symptomsSummary, demographics);
       return;
     }
@@ -309,7 +319,7 @@ export function TriageChat({ onComplete }: TriageChatProps) {
     if (isProcessing || isTyping) return;
 
     setIsProcessing(true);
-    
+
     // Add user's choice as a message
     addMessage({
       role: 'user',
@@ -360,22 +370,22 @@ export function TriageChat({ onComplete }: TriageChatProps) {
           </div>
         </div>
       </header>
-      
+
       {/* Messages Area - Light background */}
       <div className="flex-1 overflow-hidden relative">
         <ScrollArea className="h-full px-3 md:px-6 py-4 md:py-6" ref={scrollAreaRef}>
           <div className="space-y-4 md:space-y-5 max-w-4xl mx-auto">
             {messages.map((message) => (
-              <MessageBubble 
-                key={message.id} 
-                message={message} 
+              <MessageBubble
+                key={message.id}
+                message={message}
                 onOptionClick={handleOptionClick}
                 disabled={isProcessing || isTyping}
               />
             ))}
-            
+
             {isTyping && <TypingIndicator />}
-            
+
             <div ref={messagesEndRef} />
           </div>
         </ScrollArea>
@@ -400,7 +410,7 @@ export function TriageChat({ onComplete }: TriageChatProps) {
               <Mic className={cn("h-5 w-5 md:h-5 md:w-5", isListening ? "text-white" : "text-indigo-600")} />
             </button>
           )}
-          
+
           {/* Text Input - Modern design */}
           <div className="flex-1 relative">
             <Input
@@ -421,9 +431,9 @@ export function TriageChat({ onComplete }: TriageChatProps) {
               </span>
             )}
           </div>
-          
+
           {/* Send Button - Joyful gradient */}
-          <button 
+          <button
             type="submit"
             className={cn(
               "flex items-center justify-center flex-shrink-0 rounded-full h-10 w-10 md:h-11 md:w-11 transition-all",
@@ -439,7 +449,7 @@ export function TriageChat({ onComplete }: TriageChatProps) {
               <Send className="h-5 w-5 md:h-5 md:w-5 text-white" />
             )}
           </button>
-          
+
           {/* Manual Finish Button - Modern style */}
           {showManualFinish && !isProcessing && consentStep === 'completed' && (
             <Button
@@ -473,20 +483,20 @@ interface MessageBubbleProps {
 
 function MessageBubble({ message, onOptionClick, disabled }: MessageBubbleProps) {
   const isUser = message.role === 'user';
-  
+
   // Parse message content - Minimal version (no icons)
   const renderMessageContent = (content: string) => {
     const lines = content.split('\n');
-    
+
     return lines.map((line, idx) => {
       // Remove icon prefixes (like CHECK|, ALERT|, INFO|, etc.)
       const cleanedLine = line.replace(/^[A-Z]+\|/, '');
-      
+
       // Regular line - just text
       return cleanedLine ? <div key={idx} className="mb-1.5">{cleanedLine}</div> : <div key={idx} className="h-2" />;
     });
   };
-  
+
   return (
     <div className={cn(
       "flex animate-in fade-in-50 slide-in-from-bottom-2 duration-500",
@@ -499,8 +509,8 @@ function MessageBubble({ message, onOptionClick, disabled }: MessageBubbleProps)
         {/* Message Bubble - Modern joyful design */}
         <div className={cn(
           "rounded-[24px] px-4 py-3 md:px-5 md:py-3.5",
-          isUser 
-            ? "bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-indigo-200 rounded-br-sm" 
+          isUser
+            ? "bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-indigo-200 rounded-br-sm"
             : "bg-white text-slate-700 shadow-sm rounded-bl-sm"
         )}>
           <div className="text-sm md:text-base leading-relaxed">
@@ -511,13 +521,13 @@ function MessageBubble({ message, onOptionClick, disabled }: MessageBubbleProps)
             "text-[10px] md:text-xs block text-right mt-2 font-light",
             isUser ? "text-white/70" : "text-slate-400"
           )}>
-            {message.timestamp.toLocaleTimeString('es-ES', { 
-              hour: '2-digit', 
-              minute: '2-digit' 
+            {message.timestamp.toLocaleTimeString('es-ES', {
+              hour: '2-digit',
+              minute: '2-digit'
             })}
           </span>
         </div>
-        
+
         {/* Quick Reply Options - Modern interactive chips */}
         {message.options && message.options.length > 0 && !isUser && (
           <div className="flex flex-wrap gap-2 md:gap-2.5 animate-in fade-in-50 slide-in-from-bottom-1 duration-700">
