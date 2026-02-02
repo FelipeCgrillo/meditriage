@@ -72,34 +72,35 @@ export default function PacientePage() {
             // Generate anonymous patient code
             const patientCode = generateAnonymousCode();
 
-            // Save to database with anonymous code and demographic data
-            // Simplified insert without .select().single() to avoid timeout
-            console.log('[PacientePage] Saving to database...');
-            try {
-                const { error } = await supabase
-                    .from('clinical_records')
-                    .insert({
-                        patient_consent: true,
-                        symptoms_text: finalSymptoms,
-                        ai_response: result as any,
-                        esi_level: result.esi_level,
-                        nurse_validated: false,
-                        anonymous_code: patientCode,
-                        patient_gender: demographics.gender || null,
-                        patient_age_group: demographics.ageGroup || null,
-                        conversation_history: conversationHistory,
-                    } as any);
+            // Save to database in background (fire-and-forget to not block UI)
+            console.log('[PacientePage] Saving to database (async)...');
+            (async () => {
+                try {
+                    const { error } = await supabase
+                        .from('clinical_records')
+                        .insert({
+                            patient_consent: true,
+                            symptoms_text: finalSymptoms,
+                            ai_response: result as any,
+                            esi_level: result.esi_level,
+                            nurse_validated: false,
+                            anonymous_code: patientCode,
+                            patient_gender: demographics.gender || null,
+                            patient_age_group: demographics.ageGroup || null,
+                            conversation_history: conversationHistory,
+                        } as any);
 
-                if (error) {
-                    console.error('[PacientePage] Error saving to database:', error.message, error.code, error.details);
-                } else {
-                    console.log('[PacientePage] Saved successfully!');
+                    if (error) {
+                        console.error('[PacientePage] DB Error:', error.message, error.code);
+                    } else {
+                        console.log('[PacientePage] DB: Saved successfully!');
+                    }
+                } catch (err) {
+                    console.error('[PacientePage] DB Exception:', err);
                 }
-            } catch (dbError) {
-                console.error('[PacientePage] Database exception:', dbError);
-            }
+            })();
 
-            // Always set the code and proceed to success screen
+            // Proceed immediately to success screen
             setAnonymousCode(patientCode);
             console.log('[PacientePage] Proceeding to success screen');
             setCurrentStep('success');
