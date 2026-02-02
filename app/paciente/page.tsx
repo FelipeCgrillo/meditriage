@@ -73,31 +73,49 @@ export default function PacientePage() {
             const patientCode = generateAnonymousCode();
 
             // Save to database with anonymous code and demographic data
+            // Wrap in try/catch with timeout to prevent hanging
             console.log('[PacientePage] Saving to database...');
-            const { data: dbData, error } = await supabase
-                .from('clinical_records')
-                .insert({
-                    patient_consent: true,
-                    symptoms_text: finalSymptoms,
-                    ai_response: result as any,
-                    esi_level: result.esi_level,
-                    nurse_validated: false,
-                    anonymous_code: patientCode,
-                    patient_gender: demographics.gender || null,
-                    patient_age_group: demographics.ageGroup || null,
-                    conversation_history: conversationHistory,
-                } as any)
-                .select('anonymous_code')
-                .single();
+            try {
+                const insertPromise = supabase
+                    .from('clinical_records')
+                    .insert({
+                        patient_consent: true,
+                        symptoms_text: finalSymptoms,
+                        ai_response: result as any,
+                        esi_level: result.esi_level,
+                        nurse_validated: false,
+                        anonymous_code: patientCode,
+                        patient_gender: demographics.gender || null,
+                        patient_age_group: demographics.ageGroup || null,
+                        conversation_history: conversationHistory,
+                    } as any)
+                    .select('anonymous_code')
+                    .single();
 
-            if (error) {
-                console.error('[PacientePage] Error saving to database:', error);
+                // Add 10 second timeout
+                const timeoutPromise = new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error('Database timeout')), 10000)
+                );
+
+                const { data: dbData, error } = await Promise.race([
+                    insertPromise,
+                    timeoutPromise
+                ]) as any;
+
+                if (error) {
+                    console.error('[PacientePage] Error saving to database:', error);
+                    setAnonymousCode(patientCode);
+                } else {
+                    console.log('[PacientePage] Saved successfully:', dbData);
+                    setAnonymousCode(dbData?.anonymous_code || patientCode);
+                }
+            } catch (dbError) {
+                console.error('[PacientePage] Database exception:', dbError);
                 setAnonymousCode(patientCode);
-            } else {
-                console.log('[PacientePage] Saved successfully:', dbData);
-                setAnonymousCode(dbData?.anonymous_code || patientCode);
             }
 
+            // Always proceed to success screen
+            console.log('[PacientePage] Proceeding to success screen');
             setCurrentStep('success');
         } catch (error) {
             console.error('[PacientePage] Error completing triage:', error);
