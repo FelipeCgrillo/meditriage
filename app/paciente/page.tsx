@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import { TriageChat, Message, DemographicData } from '@/components/triage/TriageChat';
 import { SuccessScreen } from '@/components/SuccessScreen';
-import { supabase } from '@/lib/supabase/client';
 import { generateAnonymousCode } from '@/lib/utils/anonymousCode';
 import type { TriageResult } from '@/lib/ai/schemas';
 
@@ -72,33 +71,33 @@ export default function PacientePage() {
             // Generate anonymous patient code
             const patientCode = generateAnonymousCode();
 
-            // Save to database in background (fire-and-forget to not block UI)
-            console.log('[PacientePage] Saving to database (async)...');
-            (async () => {
-                try {
-                    const { error } = await supabase
-                        .from('clinical_records')
-                        .insert({
-                            patient_consent: true,
-                            symptoms_text: finalSymptoms,
-                            ai_response: result as any,
-                            esi_level: result.esi_level,
-                            nurse_validated: false,
-                            anonymous_code: patientCode,
-                            patient_gender: demographics.gender || null,
-                            patient_age_group: demographics.ageGroup || null,
-                            conversation_history: conversationHistory,
-                        } as any);
-
-                    if (error) {
-                        console.error('[PacientePage] DB Error:', error.message, error.code);
+            // Save to database via API route (server-side bypasses RLS)
+            console.log('[PacientePage] Saving to database via API...');
+            fetch('/api/clinical-records', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    patient_consent: true,
+                    symptoms_text: finalSymptoms,
+                    ai_response: result,
+                    esi_level: result.esi_level,
+                    anonymous_code: patientCode,
+                    patient_gender: demographics.gender || null,
+                    patient_age_group: demographics.ageGroup || null,
+                    conversation_history: conversationHistory,
+                }),
+            })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        console.log('[PacientePage] DB: Saved successfully!', data.data);
                     } else {
-                        console.log('[PacientePage] DB: Saved successfully!');
+                        console.error('[PacientePage] DB Error:', data.error);
                     }
-                } catch (err) {
+                })
+                .catch(err => {
                     console.error('[PacientePage] DB Exception:', err);
-                }
-            })();
+                });
 
             // Proceed immediately to success screen
             setAnonymousCode(patientCode);
