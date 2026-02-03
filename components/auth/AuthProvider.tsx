@@ -42,31 +42,36 @@ export function AuthProvider({ children }: AuthProviderProps) {
     useEffect(() => {
         let isMounted = true;
 
-        // Función simple para cargar perfil (sin bloquear)
-        async function loadProfile(userId: string) {
+        // Función para cargar perfil - AHORA retorna Promise para poder esperar
+        async function loadProfile(userId: string): Promise<UserProfile | null> {
             try {
-                // Usar query directa en lugar de RPC para evitar problemas
+                console.log('[AuthProvider] Cargando perfil para:', userId);
                 const { data, error } = await supabase
                     .from('user_profiles')
                     .select('id, email, role, full_name')
                     .eq('id', userId)
-                    .maybeSingle(); // maybeSingle no lanza error si no hay resultados
+                    .maybeSingle();
 
                 if (error) {
                     console.error('[AuthProvider] Error cargando perfil:', error.message);
-                    return;
+                    return null;
                 }
 
                 if (data && isMounted) {
                     console.log('[AuthProvider] Perfil cargado:', data.role);
                     setProfile(data as UserProfile);
+                    return data as UserProfile;
                 }
+
+                console.warn('[AuthProvider] No se encontró perfil para el usuario');
+                return null;
             } catch (err) {
                 console.error('[AuthProvider] Error inesperado:', err);
+                return null;
             }
         }
 
-        // Inicialización rápida
+        // Inicialización - AHORA espera al perfil antes de marcar loading=false
         async function init() {
             try {
                 console.log('[AuthProvider] Iniciando...');
@@ -77,11 +82,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
                 console.log('[AuthProvider] Sesión:', s ? 'existe' : 'no existe');
                 setSession(s);
                 setUser(s?.user ?? null);
-                setLoading(false); // ← Terminar loading ANTES de cargar perfil
 
-                // Cargar perfil en background (no bloquea la UI)
+                // ✅ CORRECCIÓN: Esperar a que el perfil se cargue ANTES de terminar loading
                 if (s?.user) {
-                    loadProfile(s.user.id);
+                    await loadProfile(s.user.id);
+                }
+
+                // Solo marcar loading=false DESPUÉS de que el perfil esté listo
+                if (isMounted) {
+                    setLoading(false);
+                    console.log('[AuthProvider] Inicialización completa');
                 }
             } catch (err) {
                 console.error('[AuthProvider] Error:', err);
@@ -93,19 +103,23 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
         // Escuchar cambios de auth
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
-            (event, newSession) => {
+            async (event, newSession) => {
                 console.log('[AuthProvider] Auth cambió:', event);
 
                 if (!isMounted) return;
 
                 setSession(newSession);
                 setUser(newSession?.user ?? null);
-                setLoading(false);
 
                 if (newSession?.user) {
-                    loadProfile(newSession.user.id);
+                    // ✅ CORRECCIÓN: Esperar perfil antes de terminar loading
+                    await loadProfile(newSession.user.id);
                 } else {
                     setProfile(null);
+                }
+
+                if (isMounted) {
+                    setLoading(false);
                 }
             }
         );
