@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, useRef, ReactNode, useCallback } from 'react';
+import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import type { User, Session } from '@supabase/supabase-js';
 
@@ -39,129 +39,82 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const [session, setSession] = useState<Session | null>(null);
     const [loading, setLoading] = useState(true);
 
-    // Usar ref para controlar el timeout y evitar race conditions
-    const timeoutRef = useRef<NodeJS.Timeout | null>(null);
-    const initializedRef = useRef(false);
-
-    // Función para cargar el perfil del usuario
-    const loadUserProfile = useCallback(async (userId: string, userEmail: string) => {
-        console.log('[AuthProvider] Cargando perfil para:', userEmail);
-        try {
-            const { data: profileData, error } = await supabase
-                .rpc('get_current_user_profile')
-                .single();
-
-            if (error) {
-                console.error('[AuthProvider] Error al cargar perfil:', error.message);
-                return null;
-            }
-
-            if (profileData) {
-                const typedProfile = profileData as UserProfile;
-                console.log('[AuthProvider] Perfil cargado:', typedProfile.role);
-                return typedProfile;
-            }
-
-            console.warn('[AuthProvider] No se encontró perfil para el usuario');
-            return null;
-        } catch (err) {
-            console.error('[AuthProvider] Error inesperado cargando perfil:', err);
-            return null;
-        }
-    }, []);
-
-    // Función para limpiar el timeout de seguridad
-    const clearSafetyTimeout = useCallback(() => {
-        if (timeoutRef.current) {
-            clearTimeout(timeoutRef.current);
-            timeoutRef.current = null;
-        }
-    }, []);
-
-    // Función para finalizar la carga
-    const finishLoading = useCallback(() => {
-        clearSafetyTimeout();
-        setLoading(false);
-        console.log('[AuthProvider] Carga finalizada');
-    }, [clearSafetyTimeout]);
-
     useEffect(() => {
-        // Evitar doble inicialización en React Strict Mode
-        if (initializedRef.current) return;
-        initializedRef.current = true;
+        let isMounted = true;
 
-        // Timeout de seguridad extendido a 10 segundos
-        timeoutRef.current = setTimeout(() => {
-            console.warn('[AuthProvider] Timeout de 10s alcanzado, forzando fin de carga');
-            setLoading(false);
-        }, 10000);
-
-        async function initializeAuth() {
+        // Función simple para cargar perfil (sin bloquear)
+        async function loadProfile(userId: string) {
             try {
-                console.log('[AuthProvider] Iniciando autenticación...');
-
-                // Obtener sesión inicial
-                const { data: { session: initialSession }, error } = await supabase.auth.getSession();
+                // Usar query directa en lugar de RPC para evitar problemas
+                const { data, error } = await supabase
+                    .from('user_profiles')
+                    .select('id, email, role, full_name')
+                    .eq('id', userId)
+                    .maybeSingle(); // maybeSingle no lanza error si no hay resultados
 
                 if (error) {
-                    console.error('[AuthProvider] Error obteniendo sesión:', error.message);
-                    finishLoading();
+                    console.error('[AuthProvider] Error cargando perfil:', error.message);
                     return;
                 }
 
-                console.log('[AuthProvider] Sesión:', initialSession ? 'encontrada' : 'no existe');
-
-                setSession(initialSession);
-                setUser(initialSession?.user ?? null);
-
-                // Si hay usuario, cargar el perfil
-                if (initialSession?.user) {
-                    const userProfile = await loadUserProfile(
-                        initialSession.user.id,
-                        initialSession.user.email || ''
-                    );
-                    setProfile(userProfile);
+                if (data && isMounted) {
+                    console.log('[AuthProvider] Perfil cargado:', data.role);
+                    setProfile(data as UserProfile);
                 }
-
-                finishLoading();
             } catch (err) {
-                console.error('[AuthProvider] Error en inicialización:', err);
-                finishLoading();
+                console.error('[AuthProvider] Error inesperado:', err);
             }
         }
 
-        // Suscribirse a cambios de autenticación
+        // Inicialización rápida
+        async function init() {
+            try {
+                console.log('[AuthProvider] Iniciando...');
+                const { data: { session: s } } = await supabase.auth.getSession();
+
+                if (!isMounted) return;
+
+                console.log('[AuthProvider] Sesión:', s ? 'existe' : 'no existe');
+                setSession(s);
+                setUser(s?.user ?? null);
+                setLoading(false); // ← Terminar loading ANTES de cargar perfil
+
+                // Cargar perfil en background (no bloquea la UI)
+                if (s?.user) {
+                    loadProfile(s.user.id);
+                }
+            } catch (err) {
+                console.error('[AuthProvider] Error:', err);
+                if (isMounted) setLoading(false);
+            }
+        }
+
+        init();
+
+        // Escuchar cambios de auth
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
-            async (event, newSession) => {
-                console.log('[AuthProvider] Cambio de estado:', event);
+            (event, newSession) => {
+                console.log('[AuthProvider] Auth cambió:', event);
+
+                if (!isMounted) return;
 
                 setSession(newSession);
                 setUser(newSession?.user ?? null);
+                setLoading(false);
 
                 if (newSession?.user) {
-                    const userProfile = await loadUserProfile(
-                        newSession.user.id,
-                        newSession.user.email || ''
-                    );
-                    setProfile(userProfile);
+                    loadProfile(newSession.user.id);
                 } else {
                     setProfile(null);
                 }
-
-                // Si aún estamos cargando, finalizar
-                finishLoading();
             }
         );
 
-        // Iniciar carga de autenticación
-        initializeAuth();
-
-        // Cleanup
         return () => {
-            clearSafetyTimeout();
+            isMounted = false;
             subscription.unsubscribe();
         };
-    }, [loadUserProfile, finishLoading, clearSafetyTimeout]);
+    }, []);
 
     return (
         <AuthContext.Provider value={{ user, profile, session, loading }}>
