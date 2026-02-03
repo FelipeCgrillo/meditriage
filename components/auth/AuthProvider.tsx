@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useRef, ReactNode, useCallback } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import type { User, Session } from '@supabase/supabase-js';
 
@@ -39,100 +39,129 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const [session, setSession] = useState<Session | null>(null);
     const [loading, setLoading] = useState(true);
 
+    // Usar ref para controlar el timeout y evitar race conditions
+    const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const initializedRef = useRef(false);
+
+    // Función para cargar el perfil del usuario
+    const loadUserProfile = useCallback(async (userId: string, userEmail: string) => {
+        console.log('[AuthProvider] Cargando perfil para:', userEmail);
+        try {
+            const { data: profileData, error } = await supabase
+                .rpc('get_current_user_profile')
+                .single();
+
+            if (error) {
+                console.error('[AuthProvider] Error al cargar perfil:', error.message);
+                return null;
+            }
+
+            if (profileData) {
+                const typedProfile = profileData as UserProfile;
+                console.log('[AuthProvider] Perfil cargado:', typedProfile.role);
+                return typedProfile;
+            }
+
+            console.warn('[AuthProvider] No se encontró perfil para el usuario');
+            return null;
+        } catch (err) {
+            console.error('[AuthProvider] Error inesperado cargando perfil:', err);
+            return null;
+        }
+    }, []);
+
+    // Función para limpiar el timeout de seguridad
+    const clearSafetyTimeout = useCallback(() => {
+        if (timeoutRef.current) {
+            clearTimeout(timeoutRef.current);
+            timeoutRef.current = null;
+        }
+    }, []);
+
+    // Función para finalizar la carga
+    const finishLoading = useCallback(() => {
+        clearSafetyTimeout();
+        setLoading(false);
+        console.log('[AuthProvider] Carga finalizada');
+    }, [clearSafetyTimeout]);
+
     useEffect(() => {
-        let timeoutId: NodeJS.Timeout;
+        // Evitar doble inicialización en React Strict Mode
+        if (initializedRef.current) return;
+        initializedRef.current = true;
 
-        // Get initial session
-        async function getInitialSession() {
+        // Timeout de seguridad extendido a 10 segundos
+        timeoutRef.current = setTimeout(() => {
+            console.warn('[AuthProvider] Timeout de 10s alcanzado, forzando fin de carga');
+            setLoading(false);
+        }, 10000);
+
+        async function initializeAuth() {
             try {
-                console.log('[AuthProvider] Fetching initial session...');
-                const { data: { session } } = await supabase.auth.getSession();
-                console.log('[AuthProvider] Session fetched:', session ? 'exists' : 'none');
+                console.log('[AuthProvider] Iniciando autenticación...');
 
-                setSession(session);
-                setUser(session?.user ?? null);
+                // Obtener sesión inicial
+                const { data: { session: initialSession }, error } = await supabase.auth.getSession();
 
-                if (session?.user) {
-                    console.log('[AuthProvider] Fetching profile for user:', session.user.email);
-                    try {
-                        // Use RPC function instead of direct table query to bypass RLS issues
-                        const { data: profileData, error } = await supabase
-                            .rpc('get_current_user_profile')
-                            .single();
-
-                        if (error) {
-                            console.error('[AuthProvider] Profile fetch error:', error);
-                        } else if (profileData) {
-                            const typedProfile = profileData as UserProfile;
-                            console.log('[AuthProvider] Profile loaded successfully:', typedProfile.role);
-                            setProfile(typedProfile);
-                        } else {
-                            console.warn('[AuthProvider] No profile data found');
-                        }
-                    } catch (profileError) {
-                        // Profile table may not exist or RLS blocks access - continue without profile
-                        console.warn('[AuthProvider] Could not fetch user profile:', profileError);
-                    }
-                } else {
-                    console.log('[AuthProvider] No session user found');
+                if (error) {
+                    console.error('[AuthProvider] Error obteniendo sesión:', error.message);
+                    finishLoading();
+                    return;
                 }
+
+                console.log('[AuthProvider] Sesión:', initialSession ? 'encontrada' : 'no existe');
+
+                setSession(initialSession);
+                setUser(initialSession?.user ?? null);
+
+                // Si hay usuario, cargar el perfil
+                if (initialSession?.user) {
+                    const userProfile = await loadUserProfile(
+                        initialSession.user.id,
+                        initialSession.user.email || ''
+                    );
+                    setProfile(userProfile);
+                }
+
+                finishLoading();
             } catch (err) {
-                console.error('[AuthProvider] Auth session error:', err);
-            } finally {
-                console.log('[AuthProvider] Setting loading to false');
-                setLoading(false);
+                console.error('[AuthProvider] Error en inicialización:', err);
+                finishLoading();
             }
         }
 
-        // Safety timeout to prevent infinite loading
-        timeoutId = setTimeout(() => {
-            console.warn('[AuthProvider] Auth timeout reached after 5s, forcing loading state to false');
-            setLoading(false);
-        }, 5000);
-
-        getInitialSession();
-
-        // Listen for auth changes
+        // Suscribirse a cambios de autenticación
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
-            async (event, session) => {
-                console.log('[AuthProvider] Auth state changed:', event, session ? 'has session' : 'no session');
-                setSession(session);
-                setUser(session?.user ?? null);
+            async (event, newSession) => {
+                console.log('[AuthProvider] Cambio de estado:', event);
 
-                if (session?.user) {
-                    console.log('[AuthProvider] Auth change - fetching profile for:', session.user.email);
-                    try {
-                        // Use RPC function instead of direct table query to bypass RLS issues
-                        const { data: profileData, error } = await supabase
-                            .rpc('get_current_user_profile')
-                            .single();
+                setSession(newSession);
+                setUser(newSession?.user ?? null);
 
-                        if (error) {
-                            console.error('[AuthProvider] Profile fetch error on auth change:', error);
-                        } else if (profileData) {
-                            const typedProfile = profileData as UserProfile;
-                            console.log('[AuthProvider] Profile loaded on auth change:', typedProfile.role);
-                            setProfile(typedProfile);
-                        }
-                    } catch (profileError) {
-                        console.warn('[AuthProvider] Could not fetch user profile on auth change:', profileError);
-                    }
+                if (newSession?.user) {
+                    const userProfile = await loadUserProfile(
+                        newSession.user.id,
+                        newSession.user.email || ''
+                    );
+                    setProfile(userProfile);
                 } else {
-                    console.log('[AuthProvider] Auth change - clearing profile');
                     setProfile(null);
                 }
 
-                // Clear the timeout since we're setting loading state
-                clearTimeout(timeoutId);
-                setLoading(false);
+                // Si aún estamos cargando, finalizar
+                finishLoading();
             }
         );
 
+        // Iniciar carga de autenticación
+        initializeAuth();
+
+        // Cleanup
         return () => {
-            clearTimeout(timeoutId);
+            clearSafetyTimeout();
             subscription.unsubscribe();
         };
-    }, []);
+    }, [loadUserProfile, finishLoading, clearSafetyTimeout]);
 
     return (
         <AuthContext.Provider value={{ user, profile, session, loading }}>
