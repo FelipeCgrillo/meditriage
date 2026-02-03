@@ -33,6 +33,17 @@ interface AuthProviderProps {
     children: ReactNode;
 }
 
+// Helper para agregar timeout a una promesa
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+    return Promise.race([
+        promise,
+        new Promise<T>((resolve) => setTimeout(() => {
+            console.warn(`[AuthProvider] Timeout de ${ms}ms alcanzado`);
+            resolve(fallback);
+        }, ms))
+    ]);
+}
+
 export function AuthProvider({ children }: AuthProviderProps) {
     const [user, setUser] = useState<User | null>(null);
     const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -42,36 +53,46 @@ export function AuthProvider({ children }: AuthProviderProps) {
     useEffect(() => {
         let isMounted = true;
 
-        // Función para cargar perfil - AHORA retorna Promise para poder esperar
+        // Función para cargar perfil con timeout de 3 segundos
         async function loadProfile(userId: string): Promise<UserProfile | null> {
-            try {
-                console.log('[AuthProvider] Cargando perfil para:', userId);
-                const { data, error } = await supabase
-                    .from('user_profiles')
-                    .select('id, email, role, full_name')
-                    .eq('id', userId)
-                    .maybeSingle();
+            console.log('[AuthProvider] Cargando perfil para:', userId);
 
-                if (error) {
-                    console.error('[AuthProvider] Error cargando perfil:', error.message);
+            const fetchProfile = async (): Promise<UserProfile | null> => {
+                try {
+                    const { data, error } = await supabase
+                        .from('user_profiles')
+                        .select('id, email, role, full_name')
+                        .eq('id', userId)
+                        .maybeSingle();
+
+                    if (error) {
+                        console.error('[AuthProvider] Error cargando perfil:', error.message);
+                        return null;
+                    }
+
+                    if (data) {
+                        console.log('[AuthProvider] Perfil cargado:', data.role);
+                        return data as UserProfile;
+                    }
+
+                    console.warn('[AuthProvider] No se encontró perfil');
+                    return null;
+                } catch (err) {
+                    console.error('[AuthProvider] Error inesperado:', err);
                     return null;
                 }
+            };
 
-                if (data && isMounted) {
-                    console.log('[AuthProvider] Perfil cargado:', data.role);
-                    setProfile(data as UserProfile);
-                    return data as UserProfile;
-                }
+            // Timeout de 3 segundos para la carga del perfil
+            const profileData = await withTimeout(fetchProfile(), 3000, null);
 
-                console.warn('[AuthProvider] No se encontró perfil para el usuario');
-                return null;
-            } catch (err) {
-                console.error('[AuthProvider] Error inesperado:', err);
-                return null;
+            if (profileData && isMounted) {
+                setProfile(profileData);
             }
+
+            return profileData;
         }
 
-        // Inicialización - AHORA espera al perfil antes de marcar loading=false
         async function init() {
             try {
                 console.log('[AuthProvider] Iniciando...');
@@ -83,15 +104,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
                 setSession(s);
                 setUser(s?.user ?? null);
 
-                // ✅ CORRECCIÓN: Esperar a que el perfil se cargue ANTES de terminar loading
+                // Intentar cargar perfil (con timeout, no bloquea indefinidamente)
                 if (s?.user) {
                     await loadProfile(s.user.id);
                 }
 
-                // Solo marcar loading=false DESPUÉS de que el perfil esté listo
                 if (isMounted) {
                     setLoading(false);
-                    console.log('[AuthProvider] Inicialización completa');
+                    console.log('[AuthProvider] ✅ Inicialización completa');
                 }
             } catch (err) {
                 console.error('[AuthProvider] Error:', err);
@@ -112,7 +132,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
                 setUser(newSession?.user ?? null);
 
                 if (newSession?.user) {
-                    // ✅ CORRECCIÓN: Esperar perfil antes de terminar loading
                     await loadProfile(newSession.user.id);
                 } else {
                     setProfile(null);
