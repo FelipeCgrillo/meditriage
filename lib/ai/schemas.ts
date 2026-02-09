@@ -106,3 +106,45 @@ export const TriageInputSchema = z.object({
 });
 
 export type TriageInput = z.infer<typeof TriageInputSchema>;
+
+/**
+ * Schema for clinical FLAGS (missing data detection)
+ * Used for auditing and research metrics (OE4)
+ */
+export const ClinicalFlagSchema = z.object({
+    type: z.enum([
+        'VAGUEDAD_SEMANTICA',
+        'SIN_TEMPORALIDAD',
+        'SIN_LOCALIZACION',
+        'SIN_SEVERIDAD',
+        'SIN_CONTEXTO',
+    ]).describe('Type of missing clinical data'),
+    priority: z.number().int().min(1).max(6).describe('Priority level (1=highest)'),
+    reason: z.string().describe('Reason why this FLAG was raised'),
+});
+
+export type ClinicalFlagData = z.infer<typeof ClinicalFlagSchema>;
+
+/**
+ * Extended API response schema including FLAGS metadata
+ */
+export const TriageAPIResponseSchema = z.object({
+    success: z.boolean(),
+    data: TriageResponseSchema.optional(),
+    // Clinical parser metadata for auditing
+    parserMetadata: z.object({
+        isComplete: z.boolean().describe('Whether clinical data is complete'),
+        detectedFlags: z.array(ClinicalFlagSchema).describe('FLAGS of missing data'),
+        extractedKeywords: z.object({
+            symptoms: z.array(z.string()),
+            temporality: z.array(z.string()),
+            location: z.array(z.string()),
+            severity: z.array(z.string()),
+        }).optional(),
+    }).optional(),
+    error: z.string().optional(),
+    fallback: z.boolean().optional(),
+    message: z.string().optional(),
+});
+
+export type TriageAPIResponse = z.infer<typeof TriageAPIResponseSchema>;

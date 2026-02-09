@@ -4,6 +4,7 @@ import { aiModel, validateAIConfig } from '@/lib/ai/config';
 import { TriageResponseSchema, TriageInputSchema } from '@/lib/ai/schemas';
 import { ESI_SYSTEM_PROMPT, FALLBACK_MESSAGE } from '@/lib/ai/prompts';
 import { sanitizeForAI } from '@/lib/utils/pii-filter';
+import { parseClinicalContent, getFlagsSummary, type ClinicalParseResult } from '@/lib/ai/clinical-parser';
 
 /**
  * POST /api/triage
@@ -53,6 +54,11 @@ export async function POST(request: NextRequest) {
             content: string;
         }
         const messages = body.messages as ChatMessage[] | undefined;
+
+        // ==================== CLINICAL PARSER: FLAGS DETECTION ====================
+        // Parse clinical content to detect missing data (OE2 algorithm)
+        const parseResult: ClinicalParseResult = parseClinicalContent(sanitizedSymptoms);
+        console.log(`[Clinical Parser] ${getFlagsSummary(parseResult)}`);
 
         // ==================== CONTROL DE FLUJO: LÍMITE DE TURNOS ====================
         // Conteo de preguntas de seguimiento del usuario (excluyendo flujo de consentimiento)
@@ -173,6 +179,21 @@ Proporciona tu evaluación estructurada siguiendo el protocolo ESI.`;
         return NextResponse.json({
             success: true,
             data: validatedResult,
+            // Include parser metadata for auditing (OE4 research metrics)
+            parserMetadata: {
+                isComplete: parseResult.isComplete,
+                detectedFlags: parseResult.detectedFlags.map(f => ({
+                    type: f.type,
+                    priority: f.priority,
+                    reason: f.reason,
+                })),
+                extractedKeywords: {
+                    symptoms: parseResult.extractedData.symptomKeywords,
+                    temporality: parseResult.extractedData.temporalityKeywords,
+                    location: parseResult.extractedData.locationKeywords,
+                    severity: parseResult.extractedData.severityKeywords,
+                },
+            },
         });
 
     } catch (error) {
