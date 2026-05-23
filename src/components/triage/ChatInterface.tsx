@@ -6,6 +6,7 @@ import { Send, AlertTriangle, ShieldCheck, Bot, Loader2, CheckCircle2, RefreshCw
 import { Button } from '@/components/ui/Button';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase/client';
 import { generateAnonymousCode } from '@/lib/utils/anonymousCode';
+import { extractJSON } from '@/lib/utils/validation';
 
 interface TriageResponse {
     status: 'success' | 'needs_info' | 'error';
@@ -42,7 +43,11 @@ export default function ChatInterface() {
         api: '/api/triage',
         onFinish: async (message) => {
             try {
-                const json = JSON.parse(message.content) as TriageResponse;
+                const json = extractJSON<TriageResponse>(message.content);
+                if (!json) {
+                    console.warn('[triage] assistant message did not contain parseable JSON');
+                    return;
+                }
 
                 // Bail out on fallback/error payloads — do NOT persist or
                 // mark the flow as finished, so the user can retry.
@@ -181,6 +186,27 @@ export default function ChatInterface() {
         return -1;
     })();
 
+    // Detect a fallback/error payload in the latest assistant message so we can
+    // surface the retry banner even though the API responded with HTTP 200.
+    const latestAssistantPayload =
+        lastAssistantIndex >= 0
+            ? extractJSON<TriageResponse>(messages[lastAssistantIndex].content)
+            : null;
+    const latestAssistantHasError = Boolean(
+        latestAssistantPayload && (latestAssistantPayload.error || latestAssistantPayload.status === 'error'),
+    );
+    const showErrorBanner = !isLoading && (Boolean(error) || latestAssistantHasError);
+
+    const handleRetry = () => {
+        // Prefer reload() when the last turn is an assistant reply (retries
+        // the last user message); fall back to a no-op otherwise.
+        try {
+            reload();
+        } catch (e) {
+            console.error('[triage] reload failed:', e);
+        }
+    };
+
     return (
         <div className="flex flex-col h-[calc(100vh-6rem)] max-w-2xl mx-auto bg-white shadow-2xl rounded-3xl overflow-hidden border border-slate-200">
             {/* Header */}
@@ -228,16 +254,20 @@ export default function ChatInterface() {
                     let responseOptions: string[] | undefined;
 
                     if (!isUser) {
-                        try {
-                            const parsed = JSON.parse(m.content);
-                            triageData = parsed as TriageResponse;
-                            content = triageData.status === 'needs_info'
+                        const parsed = extractJSON<TriageResponse>(m.content);
+                        if (parsed) {
+                            triageData = parsed;
+                            const visibleText = triageData.status === 'needs_info'
                                 ? (triageData.follow_up_question || triageData.suggested_action)
-                                : triageData.suggested_action;
-                            responseOptions = triageData.response_options;
-                        } catch (e) {
-                            // Not JSON yet (still streaming) — render as-is.
+                                : (triageData.suggested_action || triageData.message || '');
+                            content = visibleText || content;
+                            responseOptions = Array.isArray(triageData.response_options)
+                                ? triageData.response_options.filter(
+                                    (o) => typeof o === 'string' && o.trim().length > 0,
+                                )
+                                : undefined;
                         }
+                        // Otherwise: still streaming or not JSON — render raw content.
                     }
 
                     const selectedOption = answeredOptions[m.id];
@@ -325,9 +355,11 @@ export default function ChatInterface() {
                     </div>
                 )}
 
-                {/* Error banner with retry — surfaced when the API request itself fails
-                    (network error, non-2xx response not handled by the data stream). */}
-                {error && !isLoading && (
+                {/* Error banner with retry — surfaced both when the request itself fails
+                    (transport / useChat.error) and when the assistant returned a
+                    structured fallback payload with error: true (e.g. AI provider
+                    outage handled by the API route). */}
+                {showErrorBanner && (
                     <div
                         role="alert"
                         className="flex justify-start"
@@ -338,13 +370,12 @@ export default function ChatInterface() {
                                 <span className="font-bold text-sm">No se pudo procesar la respuesta</span>
                             </div>
                             <p className="text-sm leading-relaxed">
-                                Hubo un problema temporal con el asistente clínico. Por favor, inténtelo
-                                nuevamente o describa sus síntomas directamente al personal de enfermería.
-                                Si presenta una emergencia, llame al 131.
+                                {latestAssistantPayload?.message ||
+                                    'Hubo un problema temporal con el asistente clínico. Por favor, inténtelo nuevamente o describa sus síntomas directamente al personal de enfermería. Si presenta una emergencia, llame al 131.'}
                             </p>
                             <button
                                 type="button"
-                                onClick={() => reload()}
+                                onClick={handleRetry}
                                 className="self-start inline-flex items-center gap-2 text-sm font-bold bg-red-600 text-white px-4 py-2 rounded-full hover:bg-red-700 transition-colors"
                             >
                                 <RefreshCw className="w-4 h-4" />

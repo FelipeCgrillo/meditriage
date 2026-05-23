@@ -1,52 +1,14 @@
 import { streamText } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
-import { TRIAGE_SYSTEM_PROMPT, FALLBACK_MESSAGE } from '@/lib/ai/prompts';
+import { TRIAGE_SYSTEM_PROMPT } from '@/lib/ai/prompts';
 import { sanitizeForAI } from '@/lib/utils/pii-filter';
+import {
+    FALLBACK_PAYLOAD,
+    buildFallbackStreamResponse,
+    buildSafeStreamTransformer,
+} from '@/lib/ai/safe-stream';
 
 export const runtime = 'edge';
-
-/**
- * Structured safe-fallback payload returned when AI is unavailable.
- * Returned as a streaming chunk so the client (useChat) renders it
- * inside the assistant bubble instead of breaking the conversation.
- */
-const FALLBACK_PAYLOAD = {
-    status: 'success' as const,
-    esi_level: null as number | null,
-    reasoning: 'Servicio de IA no disponible.',
-    suggested_action:
-        'El asistente clínico no está disponible en este momento. Por favor, presente sus síntomas directamente al personal de enfermería del CESFAM. Si presenta dolor torácico, dificultad para respirar u otro signo de alarma, acuda inmediatamente al servicio de urgencias o llame al 131.',
-    follow_up_question: null as string | null,
-    error: true,
-    message: FALLBACK_MESSAGE,
-};
-
-/**
- * Build a Vercel AI SDK-compatible data stream that delivers a single
- * JSON payload as the assistant message. This lets us return a safe
- * fallback without ever sending an HTTP 500 to the patient client.
- */
-function buildFallbackStreamResponse(payload: unknown, statusCode: number = 200) {
-    const json = JSON.stringify(payload);
-    // Data-stream protocol: '0:' is a text-delta frame. We send the
-    // entire JSON as a single text chunk so the client receives
-    // message.content === JSON.stringify(payload) and existing parsing logic works.
-    const encoder = new TextEncoder();
-    const chunk = `0:${JSON.stringify(json)}\n`;
-    const stream = new ReadableStream({
-        start(controller) {
-            controller.enqueue(encoder.encode(chunk));
-            controller.close();
-        },
-    });
-    return new Response(stream, {
-        status: statusCode,
-        headers: {
-            'Content-Type': 'text/plain; charset=utf-8',
-            'X-Triage-Fallback': '1',
-        },
-    });
-}
 
 /**
  * POST /api/triage
@@ -54,9 +16,14 @@ function buildFallbackStreamResponse(payload: unknown, statusCode: number = 200)
  *
  * Robustness contract:
  *   - Never returns HTTP 500 to the patient client.
- *   - When the AI service is unavailable (missing key, upstream error,
- *     timeout), returns a streamed safe-fallback JSON so the chat UI
- *     can render a clear Spanish message and offer a retry.
+ *   - Missing API key / synchronous AI failures return a streamed
+ *     safe-fallback JSON so the chat UI can render a clear Spanish
+ *     message and offer a retry.
+ *   - Mid-stream provider errors (rate limits, 4xx/5xx, network
+ *     drops, timeouts) are intercepted by buildSafeStreamTransformer
+ *     and rewritten so the patient sees either a full safe-fallback
+ *     bubble or, if streaming had already started, a clear Spanish
+ *     interruption notice and a clean finish frame.
  */
 export async function POST(req: Request) {
     try {
@@ -87,31 +54,45 @@ export async function POST(req: Request) {
         }
 
         // Guard against missing API key (most common production cause of 500).
-        // Returning a structured fallback ensures the patient never gets stuck.
         const apiKey = process.env.ANTHROPIC_API_KEY;
         if (!apiKey) {
             console.error('[triage] ANTHROPIC_API_KEY is not configured');
             return buildFallbackStreamResponse(FALLBACK_PAYLOAD);
         }
 
-        const sanitizedContent = sanitizeForAI(lastUserMessage.content);
+        // Sanitize EVERY user message (not only the last one) so previously
+        // submitted symptoms don't leak PII into the AI context on follow-ups.
+        const sanitizedMessages = messages.map((m) =>
+            m.role === 'user' ? { ...m, content: sanitizeForAI(m.content) } : m,
+        );
 
         const anthropic = createAnthropic({ apiKey });
 
         const result = await streamText({
             model: anthropic('claude-3-5-sonnet-20240620'),
             system: TRIAGE_SYSTEM_PROMPT,
-            messages: [
-                ...messages.slice(0, -1),
-                { ...lastUserMessage, content: sanitizedContent },
-            ],
+            messages: sanitizedMessages,
             temperature: 0.1,
         });
 
-        return result.toDataStreamResponse();
+        const upstream = result.toDataStreamResponse({
+            getErrorMessage: (err) =>
+                err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+        });
+
+        if (!upstream.body) {
+            console.error('[triage] toDataStreamResponse returned no body, sending fallback');
+            return buildFallbackStreamResponse(FALLBACK_PAYLOAD);
+        }
+
+        const safeStream = upstream.body.pipeThrough(buildSafeStreamTransformer());
+
+        return new Response(safeStream, {
+            status: 200,
+            headers: upstream.headers,
+        });
     } catch (error) {
         console.error('[triage] AI error:', error);
-        // Return a safe fallback stream so the chat client never sees HTTP 500.
         return buildFallbackStreamResponse(FALLBACK_PAYLOAD);
     }
 }

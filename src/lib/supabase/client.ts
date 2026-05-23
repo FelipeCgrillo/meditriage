@@ -16,11 +16,12 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const isConfigured = Boolean(supabaseUrl && supabaseAnonKey);
 
 if (!isConfigured) {
-    // Loud warning during build/runtime; the patient flow can still load.
+    // Warning (not error) — the patient flow can still load without persistence.
+    // Callers should branch on `isSupabaseConfigured` to skip DB writes.
     // eslint-disable-next-line no-console
-    console.error(
+    console.warn(
         '[supabase] NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY are not configured. ' +
-        'Database operations will return errors. Set these env vars to enable persistence.',
+        'Database operations will be skipped. Set these env vars to enable persistence.',
     );
 }
 

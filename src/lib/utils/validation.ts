@@ -53,3 +53,67 @@ export function extractNumbers(text: string): number[] {
     const matches = text.match(/\d+/g);
     return matches ? matches.map(Number) : [];
 }
+
+/**
+ * Tolerant JSON extractor for LLM responses.
+ *
+ * LLMs sometimes wrap JSON in markdown fences or prepend a stray sentence
+ * even when the system prompt forbids it. This finds the first balanced
+ * JSON object substring and parses it; returns null if nothing parseable
+ * is present. Never throws.
+ */
+export function extractJSON<T = unknown>(raw: string): T | null {
+    if (!raw || typeof raw !== 'string') return null;
+
+    const tryParse = (s: string): T | null => {
+        try {
+            return JSON.parse(s) as T;
+        } catch {
+            return null;
+        }
+    };
+
+    // Fast path: already valid JSON.
+    const direct = tryParse(raw.trim());
+    if (direct !== null) return direct;
+
+    // Strip a markdown fence if present (```json ... ``` or ``` ... ```).
+    const fence = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+    if (fence) {
+        const fromFence = tryParse(fence[1].trim());
+        if (fromFence !== null) return fromFence;
+    }
+
+    // Scan for the first balanced { ... } object, respecting strings.
+    const start = raw.indexOf('{');
+    if (start === -1) return null;
+
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+    for (let i = start; i < raw.length; i++) {
+        const ch = raw[i];
+        if (escape) {
+            escape = false;
+            continue;
+        }
+        if (ch === '\\') {
+            escape = true;
+            continue;
+        }
+        if (ch === '"') {
+            inString = !inString;
+            continue;
+        }
+        if (inString) continue;
+        if (ch === '{') depth++;
+        else if (ch === '}') {
+            depth--;
+            if (depth === 0) {
+                return tryParse(raw.slice(start, i + 1));
+            }
+        }
+    }
+
+    return null;
+}

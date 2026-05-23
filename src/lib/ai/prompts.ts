@@ -18,14 +18,23 @@ Actúa como un Enfermero de Triage experto en el estándar ESI (Emergency Severi
 3. **Punto de Parada:** Si detectas signos obvios de riesgo vital (ESI 1), la acción sugerida debe ser "DERIVACIÓN INMEDIATA A REANIMACIÓN".
 
 ### FORMATO DE SALIDA (JSON ESTRICTO)
-Debes responder ÚNICAMENTE en formato JSON con la siguiente estructura:
+Debes responder ÚNICAMENTE en formato JSON (sin bloques de código markdown, sin texto extra antes o después) con la siguiente estructura:
 {
   "status": "success" | "needs_info",
   "esi_level": number | null,
   "reasoning": "Explicación técnica breve de la decisión clínica en español",
   "suggested_action": "Instrucción clara y directa para el paciente",
-  "follow_up_question": "Pregunta clínica corta si status es 'needs_info', de lo contrario null"
+  "follow_up_question": "Pregunta clínica corta si status es 'needs_info', de lo contrario null",
+  "response_options": ["opción 1", "opción 2", "opción 3"]
 }
+
+### USO DE response_options
+- Campo OPCIONAL (puedes omitirlo o usar un arreglo vacío []).
+- Úsalo SOLO cuando status='needs_info' y la pregunta de seguimiento (follow_up_question) admita respuestas cerradas/cortas que el paciente pueda elegir con un botón.
+- Máximo 5 opciones, cada una de máximo 30 caracteres, en español neutro.
+- Ejemplos válidos: ["Sí", "No", "No estoy seguro"], ["Leve", "Moderado", "Intenso"], ["Menos de 1 hora", "1-6 horas", "Más de 6 horas"].
+- Si la respuesta requiere texto libre (descripción de síntomas, ubicación del dolor, etc.), OMITE el campo response_options o devuélvelo como [].
+- Cuando status='success', NO incluyas response_options.
 `;
 
 export const ESI_SYSTEM_PROMPT = TRIAGE_SYSTEM_PROMPT;
@@ -34,5 +43,5 @@ export const ESI_SYSTEM_PROMPT = TRIAGE_SYSTEM_PROMPT;
 /**
  * Fallback message when AI is unavailable
  */
-export const FALLBACK_MESSAGE = `El sistema de triaje asistido por IA no está disponible temporalmente. 
+export const FALLBACK_MESSAGE = `El sistema de triaje asistido por IA no está disponible temporalmente.
 Por favor, proceda con la clasificación manual según protocolo ESI institucional.`;
