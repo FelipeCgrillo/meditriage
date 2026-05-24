@@ -27,6 +27,7 @@ import { Bot, Send, Loader2, AlertTriangle, RefreshCw } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase/client';
 import { generateAnonymousCode } from '@/lib/utils/anonymousCode';
 import { extractJSON } from '@/lib/utils/validation';
+import { renderAssistantContent } from '@/lib/utils/triageRender';
 
 interface TriageResponse {
     status: 'success' | 'needs_info' | 'error';
@@ -72,6 +73,7 @@ const AGE_MAP: Record<string, string | null> = {
 interface TriageChatLegacyProps {
     onFinished?: (anonymousCode: string, demographics: DemographicData) => void;
 }
+
 
 export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) {
     const [consentStep, setConsentStep] = useState<ConsentStep>('welcome');
@@ -301,27 +303,13 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
                     {/* AI conversation messages (after consent flow) */}
                     {messages.map((m, idx) => {
                         const isUser = m.role === 'user';
-                        let visibleContent = m.content;
-                        let responseOptions: string[] | undefined;
-                        let esiLevel: number | null | undefined;
-                        let payload: TriageResponse | null = null;
+                        const rendered = !isUser
+                            ? renderAssistantContent(m.content, isLoading, idx === lastAssistantIdx)
+                            : null;
 
-                        if (!isUser) {
-                            payload = extractJSON<TriageResponse>(m.content);
-                            if (payload) {
-                                const visibleText =
-                                    payload.status === 'needs_info'
-                                        ? payload.follow_up_question || payload.suggested_action
-                                        : payload.suggested_action || payload.message || '';
-                                visibleContent = visibleText || m.content;
-                                responseOptions = Array.isArray(payload.response_options)
-                                    ? payload.response_options.filter(
-                                          (o) => typeof o === 'string' && o.trim().length > 0,
-                                      )
-                                    : undefined;
-                                esiLevel = payload.esi_level ?? undefined;
-                            }
-                        }
+                        // Suppress the assistant bubble while the JSON payload is
+                        // still streaming — the typing indicator carries the UX.
+                        if (!isUser && rendered?.hideBubble) return null;
 
                         const isLatest = idx === lastAssistantIdx;
                         const bubbleRole: 'assistant' | 'user' = isUser ? 'user' : 'assistant';
@@ -329,13 +317,13 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
                             <Bubble
                                 key={m.id}
                                 role={bubbleRole}
-                                content={visibleContent}
-                                options={!isUser ? responseOptions : undefined}
+                                content={isUser ? m.content : rendered?.content ?? ''}
+                                options={!isUser ? rendered?.options : undefined}
                                 selectedOption={answeredOptions[m.id]}
                                 onOptionClick={(opt) => handleAIQuickReply(m.id, opt)}
                                 disabled={isLoading}
                                 isLatestWithOptions={isLatest}
-                                esiLevel={esiLevel ?? null}
+                                esiLevel={rendered?.esiLevel ?? null}
                             />
                         );
                     })}
