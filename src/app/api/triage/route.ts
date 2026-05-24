@@ -2,6 +2,7 @@ import { streamText } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { TRIAGE_SYSTEM_PROMPT } from '@/lib/ai/prompts';
 import { sanitizeForAI } from '@/lib/utils/pii-filter';
+import { DEFAULT_ANTHROPIC_MODEL, getAnthropicModelId } from '@/lib/ai/config';
 import {
     FALLBACK_PAYLOAD,
     buildFallbackStreamResponse,
@@ -67,17 +68,36 @@ export async function POST(req: Request) {
         );
 
         const anthropic = createAnthropic({ apiKey });
+        const modelId = getAnthropicModelId();
 
         const result = await streamText({
-            model: anthropic('claude-3-5-sonnet-20240620'),
+            model: anthropic(modelId),
             system: TRIAGE_SYSTEM_PROMPT,
             messages: sanitizedMessages,
             temperature: 0.1,
         });
 
         const upstream = result.toDataStreamResponse({
-            getErrorMessage: (err) =>
-                err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+            getErrorMessage: (err) => {
+                // Surface enough provider context to debug without leaking
+                // the API key. AI SDK errors expose `statusCode` / `responseBody`.
+                const e = err as {
+                    name?: string;
+                    message?: string;
+                    statusCode?: number;
+                    cause?: unknown;
+                } | null;
+                const name = e?.name ?? 'Error';
+                const message = e?.message ?? String(err);
+                const status = e?.statusCode;
+                console.error('[triage] provider stream error', {
+                    model: modelId,
+                    name,
+                    status,
+                    message,
+                });
+                return status ? `${name} [${status}]: ${message}` : `${name}: ${message}`;
+            },
         });
 
         if (!upstream.body) {
@@ -92,7 +112,13 @@ export async function POST(req: Request) {
             headers: upstream.headers,
         });
     } catch (error) {
-        console.error('[triage] AI error:', error);
+        const e = error as { name?: string; message?: string; statusCode?: number } | null;
+        console.error('[triage] AI error', {
+            model: getAnthropicModelId(),
+            name: e?.name,
+            status: e?.statusCode,
+            message: e?.message,
+        });
         return buildFallbackStreamResponse(FALLBACK_PAYLOAD);
     }
 }
@@ -100,12 +126,20 @@ export async function POST(req: Request) {
 /**
  * GET /api/triage
  * Lightweight health check that does NOT call the AI model.
+ * Reports the resolved model id and whether ANTHROPIC_MODEL was overridden,
+ * so operators can confirm Vercel env config without exposing the API key.
  */
 export async function GET() {
+    const modelId = getAnthropicModelId();
     return new Response(
         JSON.stringify({
             ok: true,
             ai_configured: Boolean(process.env.ANTHROPIC_API_KEY),
+            model: modelId,
+            model_override: Boolean(
+                process.env.ANTHROPIC_MODEL && process.env.ANTHROPIC_MODEL.trim().length > 0,
+            ),
+            default_model: DEFAULT_ANTHROPIC_MODEL,
         }),
         {
             status: 200,

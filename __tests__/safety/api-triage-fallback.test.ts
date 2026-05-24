@@ -131,7 +131,7 @@ const cases: TestCase[] = [
         },
     },
     {
-        name: 'GET health check responds 200 with ai_configured flag',
+        name: 'GET health check responds 200 with ai_configured/model flags',
         run: async () => {
             const { GET } = await loadHandler();
             const res = await GET();
@@ -139,6 +139,63 @@ const cases: TestCase[] = [
             const body = await res.json();
             assert(typeof body.ok === 'boolean', 'body.ok should be boolean');
             assert(typeof body.ai_configured === 'boolean', 'body.ai_configured should be boolean');
+            assert(typeof body.model === 'string' && body.model.length > 0, 'body.model should be a non-empty string');
+            assert(typeof body.model_override === 'boolean', 'body.model_override should be boolean');
+            assert(typeof body.default_model === 'string', 'body.default_model should be string');
+            // Health endpoint must NEVER leak the API key value.
+            const serialized = JSON.stringify(body);
+            assert(!/sk-ant-/.test(serialized), 'health body must not include any API key value');
+        },
+    },
+    {
+        name: 'ANTHROPIC_MODEL override is respected; absence falls back to default',
+        run: async () => {
+            const { DEFAULT_ANTHROPIC_MODEL, getAnthropicModelId } = await import(
+                '../../src/lib/ai/config'
+            );
+            const original = process.env.ANTHROPIC_MODEL;
+            try {
+                delete process.env.ANTHROPIC_MODEL;
+                assert(
+                    getAnthropicModelId() === DEFAULT_ANTHROPIC_MODEL,
+                    'unset ANTHROPIC_MODEL should resolve to DEFAULT_ANTHROPIC_MODEL',
+                );
+
+                process.env.ANTHROPIC_MODEL = '   ';
+                assert(
+                    getAnthropicModelId() === DEFAULT_ANTHROPIC_MODEL,
+                    'whitespace-only ANTHROPIC_MODEL should fall back to default',
+                );
+
+                process.env.ANTHROPIC_MODEL = 'claude-sonnet-4-6';
+                assert(
+                    getAnthropicModelId() === 'claude-sonnet-4-6',
+                    'ANTHROPIC_MODEL value should be returned verbatim',
+                );
+
+                process.env.ANTHROPIC_MODEL = '  claude-3-7-sonnet-20250219  ';
+                assert(
+                    getAnthropicModelId() === 'claude-3-7-sonnet-20250219',
+                    'ANTHROPIC_MODEL value should be trimmed',
+                );
+            } finally {
+                if (original === undefined) delete process.env.ANTHROPIC_MODEL;
+                else process.env.ANTHROPIC_MODEL = original;
+            }
+        },
+    },
+    {
+        name: 'Default Anthropic model is not a known-deprecated 2024-06-20 snapshot',
+        run: async () => {
+            const { DEFAULT_ANTHROPIC_MODEL } = await import('../../src/lib/ai/config');
+            assert(
+                DEFAULT_ANTHROPIC_MODEL !== 'claude-3-5-sonnet-20240620',
+                'default model must not be the deprecated 2024-06-20 snapshot that caused the prod outage',
+            );
+            assert(
+                /^claude-/.test(DEFAULT_ANTHROPIC_MODEL),
+                'default model id should start with "claude-"',
+            );
         },
     },
     {
