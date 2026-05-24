@@ -1,11 +1,34 @@
 import { anthropic } from '@ai-sdk/anthropic';
 
 /**
- * Anthropic AI Provider Configuration  
- * Using Claude 3 Haiku for testing (faster and available in all accounts)
- * TODO: Upgrade to Claude 3.5 Sonnet when account has access
+ * Default Anthropic model. Picked as a currently generally available model id
+ * across Anthropic API accounts. Override per-environment with the
+ * ANTHROPIC_MODEL env var when a newer/different snapshot is required.
+ *
+ * Note: avoid hard-coding deprecated snapshots (e.g. claude-3-5-sonnet-20240620)
+ * here — when a snapshot is retired the AI provider call fails and the
+ * patient-facing UI falls back to the static safe message.
  */
-export const aiModel = anthropic('claude-3-haiku-20240307');
+export const DEFAULT_ANTHROPIC_MODEL: string = 'claude-3-5-sonnet-20241022';
+
+/**
+ * Resolve the Anthropic model id to use at runtime.
+ * Reads ANTHROPIC_MODEL when set (trimmed), otherwise returns the default.
+ */
+export function getAnthropicModelId(): string {
+    const raw = process.env.ANTHROPIC_MODEL;
+    if (typeof raw === 'string') {
+        const trimmed = raw.trim();
+        if (trimmed.length > 0) return trimmed;
+    }
+    return DEFAULT_ANTHROPIC_MODEL;
+}
+
+/**
+ * Anthropic AI Provider Configuration
+ * Uses ANTHROPIC_MODEL if set, otherwise DEFAULT_ANTHROPIC_MODEL.
+ */
+export const aiModel = anthropic(getAnthropicModelId());
 
 /**
  * AI Generation Settings
