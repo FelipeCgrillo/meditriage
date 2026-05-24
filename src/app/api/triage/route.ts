@@ -1,18 +1,42 @@
 import { streamText } from 'ai';
-import { anthropic } from '@ai-sdk/anthropic';
-import { TRIAGE_SYSTEM_PROMPT, FALLBACK_MESSAGE } from '@/lib/ai/prompts';
+import { createAnthropic } from '@ai-sdk/anthropic';
+import { TRIAGE_SYSTEM_PROMPT } from '@/lib/ai/prompts';
 import { sanitizeForAI } from '@/lib/utils/pii-filter';
+import {
+    FALLBACK_PAYLOAD,
+    buildFallbackStreamResponse,
+    buildSafeStreamTransformer,
+} from '@/lib/ai/safe-stream';
 
 export const runtime = 'edge';
 
 /**
  * POST /api/triage
- * Analiza los síntomas del paciente y devuelve la clasificación ESI estructurada
+ * Analiza los síntomas del paciente y devuelve la clasificación ESI estructurada.
+ *
+ * Robustness contract:
+ *   - Never returns HTTP 500 to the patient client.
+ *   - Missing API key / synchronous AI failures return a streamed
+ *     safe-fallback JSON so the chat UI can render a clear Spanish
+ *     message and offer a retry.
+ *   - Mid-stream provider errors (rate limits, 4xx/5xx, network
+ *     drops, timeouts) are intercepted by buildSafeStreamTransformer
+ *     and rewritten so the patient sees either a full safe-fallback
+ *     bubble or, if streaming had already started, a clear Spanish
+ *     interruption notice and a clean finish frame.
  */
 export async function POST(req: Request) {
     try {
-        const body = await req.json();
-        const { messages } = body;
+        const body = await req.json().catch(() => null);
+        if (!body) {
+            return new Response(JSON.stringify({ error: 'Invalid JSON body' }), {
+                status: 400,
+                headers: { 'Content-Type': 'application/json' },
+            });
+        }
+
+        type ChatMessage = { role: 'user' | 'assistant' | 'system'; content: string };
+        const { messages } = body as { messages?: ChatMessage[] };
 
         if (!messages || messages.length === 0) {
             return new Response(JSON.stringify({ error: 'Messages are required' }), {
@@ -21,7 +45,6 @@ export async function POST(req: Request) {
             });
         }
 
-        // Obtener el último mensaje del usuario
         const lastUserMessage = messages[messages.length - 1];
         if (lastUserMessage.role !== 'user') {
             return new Response(JSON.stringify({ error: 'Last message must be from user' }), {
@@ -30,41 +53,63 @@ export async function POST(req: Request) {
             });
         }
 
-        // 1. Sanitizar input para evitar PII (identificadores personales)
-        const sanitizedContent = sanitizeForAI(lastUserMessage.content);
+        // Guard against missing API key (most common production cause of 500).
+        const apiKey = process.env.ANTHROPIC_API_KEY;
+        if (!apiKey) {
+            console.error('[triage] ANTHROPIC_API_KEY is not configured');
+            return buildFallbackStreamResponse(FALLBACK_PAYLOAD);
+        }
 
-        // 2. Ejecutar análisis con IA (Claude 3.5 Sonnet)
+        // Sanitize EVERY user message (not only the last one) so previously
+        // submitted symptoms don't leak PII into the AI context on follow-ups.
+        const sanitizedMessages = messages.map((m) =>
+            m.role === 'user' ? { ...m, content: sanitizeForAI(m.content) } : m,
+        );
+
+        const anthropic = createAnthropic({ apiKey });
+
         const result = await streamText({
             model: anthropic('claude-3-5-sonnet-20240620'),
             system: TRIAGE_SYSTEM_PROMPT,
-            messages: [
-                ...messages.slice(0, -1),
-                { ...lastUserMessage, content: sanitizedContent }
-            ],
-            temperature: 0.1, // Baja temperatura para mayor consistencia Clínica
+            messages: sanitizedMessages,
+            temperature: 0.1,
         });
 
-        return result.toDataStreamResponse();
+        const upstream = result.toDataStreamResponse({
+            getErrorMessage: (err) =>
+                err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+        });
 
+        if (!upstream.body) {
+            console.error('[triage] toDataStreamResponse returned no body, sending fallback');
+            return buildFallbackStreamResponse(FALLBACK_PAYLOAD);
+        }
+
+        const safeStream = upstream.body.pipeThrough(buildSafeStreamTransformer());
+
+        return new Response(safeStream, {
+            status: 200,
+            headers: upstream.headers,
+        });
     } catch (error) {
-        console.error('Triage AI Error:', error);
-
-        return new Response(
-            JSON.stringify({
-                status: 'error',
-                esi_level: 2,
-                reasoning: 'Error técnico en el procesamiento de IA.',
-                suggested_action: 'Por seguridad, acuda a su centro de urgencias más cercano.',
-                follow_up_question: null,
-                message: FALLBACK_MESSAGE
-            }),
-            {
-                status: 500,
-                headers: { 'Content-Type': 'application/json' },
-            }
-        );
+        console.error('[triage] AI error:', error);
+        return buildFallbackStreamResponse(FALLBACK_PAYLOAD);
     }
 }
 
-
-
+/**
+ * GET /api/triage
+ * Lightweight health check that does NOT call the AI model.
+ */
+export async function GET() {
+    return new Response(
+        JSON.stringify({
+            ok: true,
+            ai_configured: Boolean(process.env.ANTHROPIC_API_KEY),
+        }),
+        {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+        },
+    );
+}

@@ -20,7 +20,12 @@ export default function RootLayout({
 }) {
     return (
         <html lang="es">
-            <body className={inter.className}>
+            {/* suppressHydrationWarning is scoped to <body> only — browser
+                extensions (Grammarly, password managers, etc.) commonly
+                inject attributes here before React hydrates. This does
+                NOT mask real hydration mismatches inside the app tree;
+                those continue to surface as React #418/#423/#425. */}
+            <body className={inter.className} suppressHydrationWarning>
                 <AuthProvider>
                     {children}
                 </AuthProvider>

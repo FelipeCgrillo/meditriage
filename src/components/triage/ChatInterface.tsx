@@ -2,17 +2,21 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useChat } from 'ai/react';
-import { Send, AlertTriangle, ShieldCheck, User, Bot, Loader2, CheckCircle2 } from 'lucide-react';
+import { Send, AlertTriangle, ShieldCheck, Bot, Loader2, CheckCircle2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
-import { supabase } from '@/lib/supabase/client';
+import { supabase, isSupabaseConfigured } from '@/lib/supabase/client';
 import { generateAnonymousCode } from '@/lib/utils/anonymousCode';
+import { extractJSON } from '@/lib/utils/validation';
 
 interface TriageResponse {
-    status: 'success' | 'needs_info';
+    status: 'success' | 'needs_info' | 'error';
     esi_level: number | null;
     reasoning: string;
     suggested_action: string;
     follow_up_question: string | null;
+    response_options?: string[];
+    error?: boolean;
+    message?: string;
 }
 
 export default function ChatInterface() {
@@ -20,15 +24,35 @@ export default function ChatInterface() {
     const [showEmergencyAlert, setShowEmergencyAlert] = useState(false);
     const [isFinished, setIsFinished] = useState(false);
     const [anonymousCode, setAnonymousCode] = useState<string | null>(null);
+    // Track which assistant message indices have already had their quick-reply
+    // buttons used so we can freeze them and prevent contaminating the
+    // medical context with contradictory answers later.
+    const [answeredOptions, setAnsweredOptions] = useState<Record<string, string>>({});
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
-    const { messages, input, handleInputChange, handleSubmit, isLoading } = useChat({
+    const {
+        messages,
+        input,
+        handleInputChange,
+        handleSubmit,
+        isLoading,
+        error,
+        reload,
+        append,
+    } = useChat({
         api: '/api/triage',
         onFinish: async (message) => {
             try {
-                const json = JSON.parse(message.content) as TriageResponse;
+                const json = extractJSON<TriageResponse>(message.content);
+                if (!json) {
+                    console.warn('[triage] assistant message did not contain parseable JSON');
+                    return;
+                }
 
-                // Si la clasificación es exitosa (success) y tiene un nivel ESI, guardamos el registro
+                // Bail out on fallback/error payloads — do NOT persist or
+                // mark the flow as finished, so the user can retry.
+                if (json.error || json.status === 'error') return;
+
                 if (json.status === 'success' && json.esi_level) {
                     if (json.esi_level <= 2) {
                         setShowEmergencyAlert(true);
@@ -37,18 +61,25 @@ export default function ChatInterface() {
                     const code = generateAnonymousCode();
                     setAnonymousCode(code);
 
-                    const { error } = await supabase
-                        .from('clinical_records')
-                        .insert({
-                            patient_consent: true,
-                            symptoms_text: messages.filter(m => m.role === 'user').map(m => m.content).join('\n'),
-                            ai_response: json as any,
-                            esi_level: json.esi_level,
-                            nurse_validated: false,
-                            anonymous_code: code,
-                        } as any);
+                    if (isSupabaseConfigured) {
+                        const { error: dbError } = await supabase
+                            .from('clinical_records')
+                            .insert({
+                                patient_consent: true,
+                                symptoms_text: messages
+                                    .filter((m) => m.role === 'user')
+                                    .map((m) => m.content)
+                                    .join('\n'),
+                                ai_response: json as any,
+                                esi_level: json.esi_level,
+                                nurse_validated: false,
+                                anonymous_code: code,
+                            } as any);
 
-                    if (error) console.error('Error saving record:', error);
+                        if (dbError) console.error('Error saving record:', dbError);
+                    } else {
+                        console.warn('[triage] Supabase not configured; skipping clinical record persistence');
+                    }
                     setIsFinished(true);
                 }
             } catch (e) {
@@ -64,6 +95,13 @@ export default function ChatInterface() {
     useEffect(() => {
         scrollToBottom();
     }, [messages, isLoading]);
+
+    const handleQuickReply = (messageId: string, option: string) => {
+        if (isLoading || answeredOptions[messageId]) return;
+        setAnsweredOptions((prev) => ({ ...prev, [messageId]: option }));
+        // Send the selected option as the next user message
+        append({ role: 'user', content: option });
+    };
 
     if (!consentAccepted) {
         return (
@@ -141,6 +179,34 @@ export default function ChatInterface() {
         );
     }
 
+    const lastAssistantIndex = (() => {
+        for (let i = messages.length - 1; i >= 0; i--) {
+            if (messages[i].role === 'assistant') return i;
+        }
+        return -1;
+    })();
+
+    // Detect a fallback/error payload in the latest assistant message so we can
+    // surface the retry banner even though the API responded with HTTP 200.
+    const latestAssistantPayload =
+        lastAssistantIndex >= 0
+            ? extractJSON<TriageResponse>(messages[lastAssistantIndex].content)
+            : null;
+    const latestAssistantHasError = Boolean(
+        latestAssistantPayload && (latestAssistantPayload.error || latestAssistantPayload.status === 'error'),
+    );
+    const showErrorBanner = !isLoading && (Boolean(error) || latestAssistantHasError);
+
+    const handleRetry = () => {
+        // Prefer reload() when the last turn is an assistant reply (retries
+        // the last user message); fall back to a no-op otherwise.
+        try {
+            reload();
+        } catch (e) {
+            console.error('[triage] reload failed:', e);
+        }
+    };
+
     return (
         <div className="flex flex-col h-[calc(100vh-6rem)] max-w-2xl mx-auto bg-white shadow-2xl rounded-3xl overflow-hidden border border-slate-200">
             {/* Header */}
@@ -181,29 +247,43 @@ export default function ChatInterface() {
                     </div>
                 )}
 
-                {messages.map((m) => {
+                {messages.map((m, idx) => {
                     const isUser = m.role === 'user';
                     let content = m.content;
                     let triageData: TriageResponse | null = null;
+                    let responseOptions: string[] | undefined;
 
                     if (!isUser) {
-                        try {
-                            const parsed = JSON.parse(m.content);
-                            triageData = parsed as TriageResponse;
-                            content = triageData.status === 'needs_info'
+                        const parsed = extractJSON<TriageResponse>(m.content);
+                        if (parsed) {
+                            triageData = parsed;
+                            const visibleText = triageData.status === 'needs_info'
                                 ? (triageData.follow_up_question || triageData.suggested_action)
-                                : triageData.suggested_action;
-                        } catch (e) {
-                            // Not JSON yet or error
+                                : (triageData.suggested_action || triageData.message || '');
+                            content = visibleText || content;
+                            responseOptions = Array.isArray(triageData.response_options)
+                                ? triageData.response_options.filter(
+                                    (o) => typeof o === 'string' && o.trim().length > 0,
+                                )
+                                : undefined;
                         }
+                        // Otherwise: still streaming or not JSON — render raw content.
                     }
 
+                    const selectedOption = answeredOptions[m.id];
+                    const isLatestAssistant = idx === lastAssistantIndex;
+
                     return (
-                        <div key={m.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'} animate-in slide-in-from-bottom-2 duration-300`}>
-                            <div className={`max-w-[85%] rounded-[24px] px-5 py-4 shadow-sm ${isUser
-                                ? 'bg-medical-primary text-white rounded-tr-none'
-                                : 'bg-white text-slate-800 border border-slate-100 rounded-tl-none ring-1 ring-slate-200/50'
-                                }`}>
+                        <div
+                            key={m.id}
+                            className={`flex ${isUser ? 'justify-end' : 'justify-start'} animate-in slide-in-from-bottom-2 duration-300`}
+                        >
+                            <div
+                                className={`max-w-[85%] rounded-[24px] px-5 py-4 shadow-sm ${isUser
+                                    ? 'bg-medical-primary text-white rounded-tr-none'
+                                    : 'bg-white text-slate-800 border border-slate-100 rounded-tl-none ring-1 ring-slate-200/50'
+                                    }`}
+                            >
                                 {!isUser && (
                                     <div className="text-[10px] font-black text-medical-primary uppercase mb-2 flex items-center gap-1.5 opacity-70">
                                         <Bot className="w-3.5 h-3.5" /> IA Clínica
@@ -213,9 +293,41 @@ export default function ChatInterface() {
                                     {content}
                                 </div>
                                 {triageData?.esi_level && !isLoading && (
-                                    <div className={`mt-3 text-[10px] px-3 py-1 rounded-full inline-block font-black uppercase tracking-wider ${triageData.esi_level <= 2 ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'
-                                        }`}>
+                                    <div
+                                        className={`mt-3 text-[10px] px-3 py-1 rounded-full inline-block font-black uppercase tracking-wider ${triageData.esi_level <= 2 ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'
+                                            }`}
+                                    >
                                         Criterio IA: ESI {triageData.esi_level}
+                                    </div>
+                                )}
+
+                                {/* Quick-reply option buttons (only active for the latest assistant
+                                    message; once answered, all buttons disable to avoid
+                                    contaminating the medical context with later clicks). */}
+                                {!isUser && responseOptions && responseOptions.length > 0 && (
+                                    <div className="mt-4 flex flex-wrap gap-2">
+                                        {responseOptions.map((opt) => {
+                                            const isSelected = selectedOption === opt;
+                                            const disabled = Boolean(selectedOption) || !isLatestAssistant || isLoading;
+                                            return (
+                                                <button
+                                                    key={opt}
+                                                    type="button"
+                                                    disabled={disabled}
+                                                    aria-pressed={isSelected}
+                                                    onClick={() => handleQuickReply(m.id, opt)}
+                                                    className={`text-sm font-bold px-4 py-2 rounded-full border transition-all
+                                                        ${isSelected
+                                                            ? 'bg-emerald-600 text-white border-emerald-600 ring-2 ring-emerald-200'
+                                                            : disabled
+                                                                ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed line-through opacity-60'
+                                                                : 'bg-white text-medical-primary border-medical-primary hover:bg-blue-50 active:scale-95'
+                                                        }`}
+                                                >
+                                                    {opt}
+                                                </button>
+                                            );
+                                        })}
                                     </div>
                                 )}
                             </div>
@@ -223,32 +335,89 @@ export default function ChatInterface() {
                     );
                 })}
 
+                {/* Visible typing/loading indicator while waiting for AI response. */}
                 {isLoading && (
-                    <div className="flex justify-start">
-                        <div className="bg-white text-slate-400 rounded-2xl rounded-tl-none px-5 py-4 border border-slate-100 shadow-sm flex items-center gap-3">
+                    <div
+                        role="status"
+                        aria-live="polite"
+                        aria-label="Analizando síntomas"
+                        className="flex justify-start"
+                    >
+                        <div className="bg-white text-slate-500 rounded-2xl rounded-tl-none px-5 py-4 border border-slate-200 shadow-sm flex items-center gap-3">
                             <Loader2 className="w-5 h-5 animate-spin text-medical-primary" />
-                            <span className="text-xs font-bold uppercase tracking-widest">Analizando...</span>
+                            <span className="text-xs font-bold uppercase tracking-widest">Analizando síntomas…</span>
+                            <span className="flex gap-1 ml-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-medical-primary animate-pulse" style={{ animationDelay: '0ms' }} />
+                                <span className="w-1.5 h-1.5 rounded-full bg-medical-primary animate-pulse" style={{ animationDelay: '150ms' }} />
+                                <span className="w-1.5 h-1.5 rounded-full bg-medical-primary animate-pulse" style={{ animationDelay: '300ms' }} />
+                            </span>
                         </div>
                     </div>
                 )}
+
+                {/* Error banner with retry — surfaced both when the request itself fails
+                    (transport / useChat.error) and when the assistant returned a
+                    structured fallback payload with error: true (e.g. AI provider
+                    outage handled by the API route). */}
+                {showErrorBanner && (
+                    <div
+                        role="alert"
+                        className="flex justify-start"
+                    >
+                        <div className="bg-red-50 border border-red-200 text-red-800 rounded-2xl px-5 py-4 flex flex-col gap-3 max-w-[85%]">
+                            <div className="flex items-center gap-2">
+                                <AlertTriangle className="w-5 h-5" />
+                                <span className="font-bold text-sm">No se pudo procesar la respuesta</span>
+                            </div>
+                            <p className="text-sm leading-relaxed">
+                                {latestAssistantPayload?.message ||
+                                    'Hubo un problema temporal con el asistente clínico. Por favor, inténtelo nuevamente o describa sus síntomas directamente al personal de enfermería. Si presenta una emergencia, llame al 131.'}
+                            </p>
+                            <button
+                                type="button"
+                                onClick={handleRetry}
+                                className="self-start inline-flex items-center gap-2 text-sm font-bold bg-red-600 text-white px-4 py-2 rounded-full hover:bg-red-700 transition-colors"
+                            >
+                                <RefreshCw className="w-4 h-4" />
+                                Reintentar
+                            </button>
+                        </div>
+                    </div>
+                )}
+
                 <div ref={messagesEndRef} />
             </div>
 
             {/* Input Area */}
-            <form onSubmit={handleSubmit} className="p-5 bg-white border-t border-slate-100 flex gap-3 items-center">
+            <form
+                onSubmit={(e) => {
+                    if (!input.trim() || isLoading) {
+                        e.preventDefault();
+                        return;
+                    }
+                    handleSubmit(e);
+                }}
+                className="p-5 bg-white border-t border-slate-100 flex gap-3 items-center"
+            >
                 <input
-                    className="flex-1 bg-slate-50 border-none rounded-2xl px-5 py-4 text-[15px] focus:ring-2 focus:ring-medical-primary/20 outline-none transition-all placeholder:text-slate-400 font-medium"
+                    className="flex-1 bg-slate-50 border-none rounded-2xl px-5 py-4 text-[15px] focus:ring-2 focus:ring-medical-primary/20 outline-none transition-all placeholder:text-slate-400 font-medium disabled:opacity-60 disabled:cursor-not-allowed"
                     value={input}
-                    placeholder="Describa sus malestares aqui..."
+                    placeholder={isLoading ? 'Analizando síntomas…' : 'Describa sus malestares aquí…'}
                     onChange={handleInputChange}
                     disabled={isLoading || isFinished}
+                    aria-disabled={isLoading || isFinished}
                 />
                 <button
                     type="submit"
                     disabled={isLoading || !input.trim() || isFinished}
+                    aria-label={isLoading ? 'Esperando respuesta' : 'Enviar mensaje'}
                     className="w-14 h-14 bg-medical-primary text-white rounded-2xl flex items-center justify-center hover:bg-blue-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all shadow-xl shadow-blue-100 active:scale-95 group"
                 >
-                    <Send className="w-6 h-6 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
+                    {isLoading ? (
+                        <Loader2 className="w-6 h-6 animate-spin" />
+                    ) : (
+                        <Send className="w-6 h-6 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
+                    )}
                 </button>
             </form>
 

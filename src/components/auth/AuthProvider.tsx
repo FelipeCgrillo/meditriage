@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { supabase } from '@/lib/supabase/client';
+import { supabase, isSupabaseConfigured } from '@/lib/supabase/client';
 import type { User, Session } from '@supabase/supabase-js';
 
 interface UserProfile {
@@ -40,6 +40,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
+        // Skip auth bootstrap entirely when Supabase is not configured.
+        // Without this, the placeholder client would attempt DNS / realtime
+        // subscriptions to a non-existent host.
+        if (!isSupabaseConfigured) {
+            setLoading(false);
+            return;
+        }
+
         // Get initial session
         async function getInitialSession() {
             try {
