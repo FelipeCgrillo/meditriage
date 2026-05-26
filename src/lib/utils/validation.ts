@@ -117,3 +117,17 @@ export function extractJSON<T = unknown>(raw: string): T | null {
 
     return null;
 }
+
+/**
+ * Unifies color classes for ESI levels based on Tailwind configurations
+ */
+export function getESIColor(level: number): string {
+    const colors: Record<number, string> = {
+        1: 'bg-esi-1 text-white',
+        2: 'bg-esi-2 text-white',
+        3: 'bg-esi-3 text-slate-900',
+        4: 'bg-esi-4 text-white',
+        5: 'bg-esi-5 text-white',
+    };
+    return colors[level] || 'bg-slate-200 text-slate-600';
+}

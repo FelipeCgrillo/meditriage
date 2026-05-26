@@ -7,6 +7,7 @@ import { Activity, Eye, EyeOff, CheckCircle, AlertTriangle, LogOut, RefreshCw, C
 import { Button } from '@/components/ui/Button';
 import type { ClinicalRecord } from '@/lib/supabase/types';
 import type { TriageResult } from '@/lib/ai/schemas';
+import { getESIColor, isValidESILevel } from '@/lib/utils/validation';
 
 export default function NurseDashboard() {
     const { profile } = useAuth();
@@ -14,6 +15,14 @@ export default function NurseDashboard() {
     const [isLoading, setIsLoading] = useState(true);
     const [validationState, setValidationState] = useState<Record<string, number | null>>({});
     const [isSubmitting, setIsSubmitting] = useState<string | null>(null);
+    const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+    useEffect(() => {
+        if (notification) {
+            const timer = setTimeout(() => setNotification(null), 5000);
+            return () => clearTimeout(timer);
+        }
+    }, [notification]);
 
     const fetchRecords = useCallback(async () => {
         setIsLoading(true);
@@ -49,7 +58,12 @@ export default function NurseDashboard() {
                     }
                 }
             )
-            .subscribe();
+            .subscribe((status, err) => {
+                if (status === 'CHANNEL_ERROR' || err) {
+                    console.error('Realtime subscription channel error:', err || status);
+                    setNotification({ message: 'Error de sincronización en tiempo real. Intente refrescar.', type: 'error' });
+                }
+            });
 
         return () => {
             supabase.removeChannel(channel);
@@ -58,35 +72,41 @@ export default function NurseDashboard() {
 
     const handleValidate = async (recordId: string) => {
         const level = validationState[recordId];
-        if (!level) return;
-
-        setIsSubmitting(recordId);
-        const { error } = await supabase
-            .from('clinical_records')
-            .update({
-                nurse_override_level: level,
-                nurse_validated: true,
-                updated_at: new Date().toISOString(),
-            })
-            .eq('id', recordId);
-
-        if (error) {
-            console.error('Error validating record:', error);
-            alert('Error al validar el registro');
+        if (!level || !isValidESILevel(level)) {
+            setNotification({ message: 'Nivel ESI inválido o no seleccionado', type: 'error' });
+            return;
         }
-        setIsSubmitting(null);
+ 
+        const previousState = validationState[recordId];
+        setIsSubmitting(recordId);
+        try {
+            const { error } = await supabase
+                .from('clinical_records')
+                .update({
+                    nurse_override_level: level,
+                    nurse_validated: true,
+                    nurse_id: profile?.id,
+                    updated_at: new Date().toISOString(),
+                })
+                .eq('id', recordId);
+ 
+            if (error) {
+                console.error('Error validating record:', error);
+                setNotification({ message: 'Error al guardar la clasificación en la base de datos', type: 'error' });
+                setValidationState((prev) => ({ ...prev, [recordId]: previousState }));
+            } else {
+                setNotification({ message: 'Clasificación de triage guardada exitosamente', type: 'success' });
+            }
+        } catch (err) {
+            console.error('Unexpected error validating record:', err);
+            setNotification({ message: 'Error de red o conexión inesperado', type: 'error' });
+            setValidationState((prev) => ({ ...prev, [recordId]: previousState }));
+        } finally {
+            setIsSubmitting(null);
+        }
     };
 
-    const getESIColor = (level: number) => {
-        const colors: Record<number, string> = {
-            1: 'bg-red-600 text-white',
-            2: 'bg-orange-500 text-white',
-            3: 'bg-yellow-400 text-slate-900',
-            4: 'bg-emerald-500 text-white',
-            5: 'bg-blue-500 text-white',
-        };
-        return colors[level] || 'bg-slate-200 text-slate-600';
-    };
+
 
     if (isLoading && records.length === 0) {
         return (
@@ -131,6 +151,18 @@ export default function NurseDashboard() {
             </header>
 
             <main className="max-w-7xl mx-auto p-6">
+                {/* Notification Banner */}
+                {notification && (
+                    <div className={`mb-6 p-4 rounded-xl border text-sm font-bold flex items-center gap-3 animate-in fade-in slide-in-from-top-4 duration-300 ${
+                        notification.type === 'success' 
+                            ? 'bg-emerald-50 border-emerald-200 text-emerald-800' 
+                            : 'bg-red-50 border-red-200 text-red-800'
+                    }`}>
+                        <span>{notification.type === 'success' ? '✅' : '⚠️'}</span>
+                        <p>{notification.message}</p>
+                    </div>
+                )}
+
                 {/* Stats Summary */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
                     <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
@@ -217,7 +249,7 @@ export default function NurseDashboard() {
                                                     </div>
                                                 ) : (
                                                     <div className="flex flex-col gap-1">
-                                                        <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg w-fit font-bold text-xs ${getESIColor(record.nurse_override_level as number)}`}>
+                                                        <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg w-fit font-bold text-xs ${record.nurse_override_level ? getESIColor(record.nurse_override_level) : 'bg-slate-200 text-slate-600'}`}>
                                                             <CheckCircle className="w-4 h-4" />
                                                             ESI {record.nurse_override_level}
                                                         </div>

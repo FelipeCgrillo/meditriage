@@ -7,6 +7,7 @@ import type { TriageResult } from '@/lib/ai/schemas';
 import { supabase } from '@/lib/supabase/client';
 import { LogoutButton } from './auth/LogoutButton';
 import { useAuth } from './auth/AuthProvider';
+import { getESIColor } from '@/lib/utils/validation';
 
 interface NurseValidationProps {
     onClose?: () => void;
@@ -103,16 +104,6 @@ export function NurseValidation({ onClose }: NurseValidationProps) {
         setNurseEstimation(null);
     };
 
-    const getESIColor = (level: number): string => {
-        const colors: Record<number, string> = {
-            1: 'bg-esi-1 text-white',
-            2: 'bg-esi-2 text-white',
-            3: 'bg-esi-3 text-gray-900',
-            4: 'bg-esi-4 text-white',
-            5: 'bg-esi-5 text-white',
-        };
-        return colors[level] || 'bg-gray-500 text-white';
-    };
 
     const getESILabel = (level: number): string => {
         const labels: Record<number, string> = {

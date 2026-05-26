@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { getCurrentUserProfile } from '@/lib/supabase/server';
 
 // This route uses the service role key to create users
 // IMPORTANT: Only accessible server-side, never expose service role key to client
@@ -9,6 +10,15 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
 export async function POST(request: NextRequest) {
     try {
+        // Verify user authentication and admin role
+        const userProfile = await getCurrentUserProfile();
+        if (!userProfile || userProfile.profile.role !== 'admin') {
+            return NextResponse.json(
+                { error: 'Unauthorized. Admin role required.' },
+                { status: 403 }
+            );
+        }
+
         // Validate service role key exists
         if (!supabaseServiceKey) {
             return NextResponse.json(
@@ -117,6 +127,15 @@ export async function POST(request: NextRequest) {
 // GET - List all users (for admin panel)
 export async function GET() {
     try {
+        // Verify user authentication and admin role
+        const userProfile = await getCurrentUserProfile();
+        if (!userProfile || userProfile.profile.role !== 'admin') {
+            return NextResponse.json(
+                { error: 'Unauthorized. Admin role required.' },
+                { status: 403 }
+            );
+        }
+
         if (!supabaseServiceKey) {
             return NextResponse.json(
                 { error: 'Service role key not configured' },
@@ -158,6 +177,15 @@ export async function GET() {
 // DELETE - Delete a user
 export async function DELETE(request: NextRequest) {
     try {
+        // Verify user authentication and admin role
+        const userProfile = await getCurrentUserProfile();
+        if (!userProfile || userProfile.profile.role !== 'admin') {
+            return NextResponse.json(
+                { error: 'Unauthorized. Admin role required.' },
+                { status: 403 }
+            );
+        }
+
         if (!supabaseServiceKey) {
             return NextResponse.json(
                 { error: 'Service role key not configured' },

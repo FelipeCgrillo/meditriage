@@ -21,6 +21,18 @@ interface ClinicalRecordForAnalysis {
     nurse_validated: boolean;
 }
 
+interface EsiLevelMetrics {
+    level: number;
+    sensitivity: number;
+    specificity: number;
+    ppv: number;
+    npv: number;
+    tp: number;
+    fp: number;
+    fn: number;
+    tn: number;
+}
+
 interface StudyMetrics {
     totalRecords: number;
     validatedRecords: number;
@@ -31,6 +43,7 @@ interface StudyMetrics {
     confusionMatrix: number[][];
     accuracyByGender: { male: number; female: number; unknown: number; maleN: number; femaleN: number; unknownN: number };
     accuracyByAgeGroup: { pediatric: number; adult: number; geriatric: number; unknown: number; pediatricN: number; adultN: number; geriatricN: number; unknownN: number };
+    esiLevelMetrics: EsiLevelMetrics[];
 }
 
 // =============================================================================
@@ -110,6 +123,47 @@ function calculateStudyMetrics(records: ClinicalRecordForAnalysis[]): StudyMetri
     // Calculate Cohen's Kappa
     const kappa = calculateCohenKappa(matrix, n);
 
+    // Calculate ESI level metrics (Sensitivity, Specificity, PPV, NPV)
+    const esiLevelMetrics: EsiLevelMetrics[] = [];
+    for (let level = 1; level <= 5; level++) {
+        let tp = 0;
+        let fp = 0;
+        let fn = 0;
+        let tn = 0;
+
+        for (const record of validRecords) {
+            const nurseEsi = record.nurse_override_level!;
+            const aiEsi = record.esi_level;
+
+            if (aiEsi === level && nurseEsi === level) {
+                tp++;
+            } else if (aiEsi === level && nurseEsi !== level) {
+                fp++;
+            } else if (aiEsi !== level && nurseEsi === level) {
+                fn++;
+            } else if (aiEsi !== level && nurseEsi !== level) {
+                tn++;
+            }
+        }
+
+        const sensitivity = (tp + fn) > 0 ? (tp / (tp + fn)) * 100 : 0;
+        const specificity = (tn + fp) > 0 ? (tn / (tn + fp)) * 100 : 0;
+        const ppv = (tp + fp) > 0 ? (tp / (tp + fp)) * 100 : 0;
+        const npv = (tn + fn) > 0 ? (tn / (tn + fn)) * 100 : 0;
+
+        esiLevelMetrics.push({
+            level,
+            sensitivity,
+            specificity,
+            ppv,
+            npv,
+            tp,
+            fp,
+            fn,
+            tn
+        });
+    }
+
     // Calculate accuracy percentages
     const safePercent = (correct: number, total: number) => total > 0 ? (correct / total) * 100 : 0;
 
@@ -138,7 +192,8 @@ function calculateStudyMetrics(records: ClinicalRecordForAnalysis[]): StudyMetri
             adultN: ageStats.Adult.total,
             geriatricN: ageStats.Geriatric.total,
             unknownN: ageStats.unknown.total
-        }
+        },
+        esiLevelMetrics
     };
 }
 
@@ -165,7 +220,7 @@ function calculateCohenKappa(matrix: number[][], n: number): number {
     }
 
     // Kappa = (Po - Pe) / (1 - Pe)
-    if (pe === 1) return 1;
+    if (Math.abs(1 - pe) < 1e-9) return po === 1 ? 1 : 0;
     return (po - pe) / (1 - pe);
 }
 
@@ -404,6 +459,82 @@ export default function ResultadosPage() {
     const [showUserPanel, setShowUserPanel] = useState(false);
     const { profile, loading: authLoading } = useAuth();
 
+    // CSV Export function
+    const exportToCSV = () => {
+        const validRecords = filteredRecords.filter(r => r.nurse_validated && r.nurse_override_level !== null);
+        
+        // Build executive summary rows
+        const summaryRows = [
+            ['--- REPORT DE RESUMEN EJECUTIVO DE VALIDACION CLINICA ---'],
+            ['Fecha de exportacion', new Date().toLocaleString('es-CL')],
+            ['Total registros en base de datos', metrics.totalRecords],
+            ['Registros validados (Muestra del estudio)', metrics.validatedRecords],
+            ['Precision Diagnostica Global (Exactitud)', `${metrics.exactAccuracy.toFixed(2)}%`],
+            ['Coeficiente Kappa de Cohen', metrics.kappaCoefficient.toFixed(3)],
+            ['Tasa de Sub-triaje (Riesgo Clinico)', `${metrics.subTriageRate.toFixed(2)}%`],
+            ['Tasa de Sobre-triaje', `${metrics.overTriageRate.toFixed(2)}%`],
+            [''],
+            ['--- METRICAS DIAGNOSTICAS POR NIVEL ESI ---'],
+            ['Nivel ESI', 'Sensibilidad', 'Especificidad', 'VPP (Precision)', 'VPN', 'TP (Verdaderos Positivos)', 'FP (Falsos Positivos)', 'FN (Falsos Negativos)', 'TN (Verdaderos Negativos)']
+        ];
+
+        // Add metrics per ESI level
+        metrics.esiLevelMetrics.forEach(esi => {
+            summaryRows.push([
+                `ESI ${esi.level}`,
+                `${esi.sensitivity.toFixed(2)}%`,
+                `${esi.specificity.toFixed(2)}%`,
+                `${esi.ppv.toFixed(2)}%`,
+                `${esi.npv.toFixed(2)}%`,
+                String(esi.tp),
+                String(esi.fp),
+                String(esi.fn),
+                String(esi.tn)
+            ]);
+        });
+
+        summaryRows.push(['']);
+        summaryRows.push(['--- DETALLE DE REGISTROS CLINICOS ---']);
+        
+        const headers = [
+            'ID',
+            'Codigo Anonimo',
+            'ESI Asignado por IA',
+            'ESI Asignado por Enfermero',
+            'Coincidencia',
+            'Genero',
+            'Grupo Etario',
+            'Consentimiento Firmado'
+        ];
+        
+        const rows = validRecords.map(r => [
+            r.id,
+            r.anonymous_code || 'N/A',
+            String(r.esi_level),
+            String(r.nurse_override_level),
+            r.esi_level === r.nurse_override_level ? 'SI' : 'NO',
+            r.patient_gender || 'Sin datos',
+            r.patient_age_group || 'Sin datos',
+            r.consent_eligible ? 'SI' : 'NO'
+        ]);
+
+        const csvContent = [
+            ...summaryRows,
+            headers,
+            ...rows
+        ].map(e => e.map(val => `"${String(val).replace(/"/g, '""')}"`).join(',')).join('\n');
+        
+        const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.setAttribute('href', url);
+        link.setAttribute('download', `triage_validacion_clinica_${new Date().toISOString().split('T')[0]}.csv`);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
     // Fetch data from Supabase
     const fetchData = async () => {
         setLoading(true);
@@ -488,11 +619,42 @@ export default function ResultadosPage() {
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-slate-50 via-gray-50 to-blue-50">
-            {/* User Management Panel */}
-            <UserManagementPanel
-                isOpen={showUserPanel}
-                onClose={() => setShowUserPanel(false)}
-            />
+            <style dangerouslySetInnerHTML={{ __html: `
+                @media print {
+                    body {
+                        background-color: white !important;
+                        color: black !important;
+                    }
+                    .print\\:hidden {
+                        display: none !important;
+                    }
+                    header {
+                        box-shadow: none !important;
+                        border-bottom: 2px solid #e2e8f0 !important;
+                        padding-bottom: 10px !important;
+                    }
+                    main {
+                        padding: 0 !important;
+                        margin: 0 !important;
+                        max-width: 100% !important;
+                    }
+                    .rounded-2xl, .rounded-3xl {
+                        border-radius: 8px !important;
+                        border: 1px solid #cbd5e1 !important;
+                    }
+                    .shadow-sm, .shadow-md, .shadow-lg, .shadow-xl {
+                        box-shadow: none !important;
+                    }
+                }
+            `}} />
+
+            {/* User Management Panel - Admin Only */}
+            {profile?.role === 'admin' && (
+                <UserManagementPanel
+                    isOpen={showUserPanel}
+                    onClose={() => setShowUserPanel(false)}
+                />
+            )}
 
             {/* HEADER */}
             <header className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-10">
@@ -514,19 +676,44 @@ export default function ResultadosPage() {
                                 👤 {profile.full_name || profile.email}
                             </span>
                         )}
-                        {/* User Management Button */}
+                        {/* User Management Button - Admin Only */}
+                        {profile?.role === 'admin' && (
+                            <button
+                                onClick={() => setShowUserPanel(true)}
+                                className="flex items-center gap-2 px-3 py-2 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition-colors text-sm font-medium print:hidden"
+                                title="Gestionar usuarios"
+                            >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+                                </svg>
+                                <span className="hidden sm:inline">Usuarios</span>
+                            </button>
+                        )}
+                        {/* CSV Export Button */}
                         <button
-                            onClick={() => setShowUserPanel(true)}
-                            className="flex items-center gap-2 px-3 py-2 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition-colors text-sm font-medium"
-                            title="Gestionar usuarios"
+                            onClick={exportToCSV}
+                            disabled={metrics.validatedRecords === 0}
+                            className="flex items-center gap-2 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors text-sm font-medium print:hidden disabled:opacity-50 disabled:cursor-not-allowed"
+                            title="Exportar registros a CSV"
                         >
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                             </svg>
-                            <span className="hidden sm:inline">Usuarios</span>
+                            <span>CSV</span>
+                        </button>
+                        {/* Print Report Button */}
+                        <button
+                            onClick={() => window.print()}
+                            className="flex items-center gap-2 px-3 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-lg transition-colors text-sm font-medium print:hidden"
+                            title="Imprimir o Guardar como PDF"
+                        >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                            </svg>
+                            <span>Imprimir</span>
                         </button>
                         {/* Eligibility Toggle */}
-                        <label className="flex items-center gap-2 cursor-pointer bg-gray-100 px-3 py-2 rounded-lg">
+                        <label className="flex items-center gap-2 cursor-pointer bg-gray-100 px-3 py-2 rounded-lg print:hidden">
                             <input
                                 type="checkbox"
                                 checked={eligibleOnly}
@@ -535,10 +722,12 @@ export default function ResultadosPage() {
                             />
                             <span className="text-sm font-medium text-gray-700">Solo Elegibles</span>
                         </label>
-                        <button onClick={fetchData} className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700" title="Actualizar datos">
+                        <button onClick={fetchData} className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 print:hidden" title="Actualizar datos">
                             <RefreshIcon />
                         </button>
-                        <LogoutButton redirectTo="/login/resultados" />
+                        <div className="print:hidden">
+                            <LogoutButton redirectTo="/login/resultados" />
+                        </div>
                     </div>
                 </div>
             </header>
@@ -616,6 +805,51 @@ export default function ResultadosPage() {
                                     <div className="text-2xl font-bold text-amber-600">{metrics.overTriageRate.toFixed(1)}%</div>
                                     <p className="text-xs text-gray-500">IA sobreestima gravedad</p>
                                 </div>
+                            </div>
+                        </section>
+
+                        {/* ESI LEVEL PERFORMANCE METRICS */}
+                        <section className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+                            <h3 className="text-lg font-bold text-gray-900 mb-2">Métricas Diagnósticas por Nivel ESI</h3>
+                            <p className="text-sm text-gray-500 mb-6">Sensibilidad, Especificidad, Valores Predictivos Positivos y Negativos por cada nivel de urgencia.</p>
+
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-left border-collapse">
+                                    <thead>
+                                        <tr className="bg-slate-50 border-b border-gray-200">
+                                            <th className="px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-wider">Nivel ESI</th>
+                                            <th className="px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-wider text-center">Sensibilidad</th>
+                                            <th className="px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-wider text-center">Especificidad</th>
+                                            <th className="px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-wider text-center">VPP (Precisión)</th>
+                                            <th className="px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-wider text-center">VPN</th>
+                                            <th className="px-4 py-3 text-xs font-bold text-slate-400 uppercase tracking-wider text-center">Casos (TP / FP / FN / TN)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-100">
+                                        {metrics.esiLevelMetrics.map((esi) => (
+                                            <tr key={esi.level} className="hover:bg-slate-50 transition-colors">
+                                                <td className="px-4 py-4 font-bold text-gray-800">
+                                                    ESI {esi.level}
+                                                </td>
+                                                <td className="px-4 py-4 text-center font-semibold text-indigo-600">
+                                                    {esi.sensitivity.toFixed(1)}%
+                                                </td>
+                                                <td className="px-4 py-4 text-center font-semibold text-emerald-600">
+                                                    {esi.specificity.toFixed(1)}%
+                                                </td>
+                                                <td className="px-4 py-4 text-center font-semibold text-blue-600">
+                                                    {esi.ppv.toFixed(1)}%
+                                                </td>
+                                                <td className="px-4 py-4 text-center font-semibold text-slate-600">
+                                                    {esi.npv.toFixed(1)}%
+                                                </td>
+                                                <td className="px-4 py-4 text-center text-xs text-gray-500 font-mono">
+                                                    {esi.tp} / {esi.fp} / {esi.fn} / {esi.tn}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
                             </div>
                         </section>
 
