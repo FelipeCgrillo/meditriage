@@ -26,15 +26,24 @@ export default function NurseDashboard() {
 
     const fetchRecords = useCallback(async () => {
         setIsLoading(true);
-        const { data, error } = await supabase
-            .from('clinical_records')
-            .select('*')
-            .order('created_at', { ascending: false });
+        try {
+            const { data, error } = await supabase
+                .from('clinical_records')
+                .select('*')
+                .order('created_at', { ascending: false });
 
-        if (!error && data) {
-            setRecords(data);
+            if (error) {
+                console.error('Error fetching clinical records:', error);
+                setNotification({ message: 'Error al cargar los registros clínicos. Intente refrescar.', type: 'error' });
+            } else if (data) {
+                setRecords(data);
+            }
+        } catch (err) {
+            console.error('Unexpected error fetching clinical records:', err);
+            setNotification({ message: 'Error de red o conexión al cargar los registros.', type: 'error' });
+        } finally {
+            setIsLoading(false);
         }
-        setIsLoading(false);
     }, []);
 
     useEffect(() => {
