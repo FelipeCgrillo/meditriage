@@ -27,18 +27,21 @@ import { Bot, Send, Loader2, AlertTriangle, RefreshCw } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase/client';
 import { generateAnonymousCode } from '@/lib/utils/anonymousCode';
 import { extractJSON } from '@/lib/utils/validation';
-import { renderAssistantContent } from '@/lib/utils/triageRender';
+import {
+    isTerminalTriageResult,
+    renderAssistantContent,
+} from '@/lib/utils/triageRender';
 import {
     buildClinicalRecordPayload,
     type ClinicalRecordPayload,
 } from '@/lib/utils/clinicalRecord';
 
 interface TriageResponse {
-    status: 'success' | 'needs_info' | 'error';
+    status?: 'success' | 'needs_info' | 'error' | string;
     esi_level: number | null;
-    reasoning: string;
-    suggested_action: string;
-    follow_up_question: string | null;
+    reasoning?: string;
+    suggested_action?: string;
+    follow_up_question?: string | null;
     response_options?: string[];
     error?: boolean;
     message?: string;
@@ -146,8 +149,13 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
             try {
                 const json = extractJSON<TriageResponse>(message.content);
                 if (!json) return;
-                if (json.error || json.status === 'error') return;
-                if (json.status !== 'success' || !json.esi_level) return;
+                // Finalize on any payload that names a valid ESI level
+                // and no longer asks the patient anything — regardless
+                // of whether `status` is exactly 'success'. The model
+                // occasionally drops or varies the status field even
+                // when the classification itself is terminal.
+                if (!isTerminalTriageResult(json)) return;
+                const esiLevel = json.esi_level as number;
 
                 const code = generateAnonymousCode();
                 const currentDemographics = demographicsRef.current;
@@ -172,7 +180,7 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
                 const payload = buildClinicalRecordPayload({
                     messages: transcript,
                     aiResponse: json as unknown as Record<string, unknown>,
-                    esiLevel: json.esi_level,
+                    esiLevel,
                     anonymousCode: code,
                     gender: currentDemographics.gender,
                     ageGroup: currentDemographics.ageGroup,
