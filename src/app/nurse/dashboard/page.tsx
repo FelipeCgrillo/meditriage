@@ -26,12 +26,19 @@ export default function NurseDashboard() {
 
     const fetchRecords = useCallback(async () => {
         setIsLoading(true);
-        console.log('[NurseDashboard] fetchRecords: iniciando. profile=', profile?.id ?? 'sin perfil');
+        console.log('[NurseDashboard] fetchRecords: iniciando');
         try {
-            const { data, error } = await supabase
+            // Promise.race con timeout de 12s para evitar que un fetch colgado
+            // en producción deje el spinner activo indefinidamente.
+            const timeoutPromise = new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('Timeout: la consulta tardó demasiado')), 12000)
+            );
+            const queryPromise = supabase
                 .from('clinical_records')
                 .select('*')
                 .order('created_at', { ascending: false });
+
+            const { data, error } = await Promise.race([queryPromise, timeoutPromise]);
 
             if (error) {
                 console.error('[NurseDashboard] fetchRecords: error de Supabase', error);
@@ -41,12 +48,12 @@ export default function NurseDashboard() {
                 setRecords(data);
             }
         } catch (err) {
-            console.error('[NurseDashboard] fetchRecords: excepción inesperada (red/CORS)', err);
-            setNotification({ message: 'Error de red o conexión al cargar los registros.', type: 'error' });
+            console.error('[NurseDashboard] fetchRecords: excepción (red/CORS/timeout)', err);
+            setNotification({ message: 'Error de red, conexión o tiempo de espera agotado. Intente refrescar.', type: 'error' });
         } finally {
             setIsLoading(false);
         }
-    }, [profile?.id]);
+    }, []);
 
     useEffect(() => {
         console.log('[NurseDashboard] useEffect: authLoading=', authLoading, '| records=', records.length, '| isLoading=', isLoading);
