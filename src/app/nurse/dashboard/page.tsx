@@ -10,7 +10,7 @@ import type { TriageResult } from '@/lib/ai/schemas';
 import { getESIColor, isValidESILevel } from '@/lib/utils/validation';
 
 export default function NurseDashboard() {
-    const { profile } = useAuth();
+    const { profile, loading: authLoading } = useAuth();
     const [records, setRecords] = useState<ClinicalRecord[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [validationState, setValidationState] = useState<Record<string, number | null>>({});
@@ -26,6 +26,7 @@ export default function NurseDashboard() {
 
     const fetchRecords = useCallback(async () => {
         setIsLoading(true);
+        console.log('[NurseDashboard] fetchRecords: iniciando. profile=', profile?.id ?? 'sin perfil');
         try {
             const { data, error } = await supabase
                 .from('clinical_records')
@@ -33,20 +34,23 @@ export default function NurseDashboard() {
                 .order('created_at', { ascending: false });
 
             if (error) {
-                console.error('Error fetching clinical records:', error);
+                console.error('[NurseDashboard] fetchRecords: error de Supabase', error);
                 setNotification({ message: 'Error al cargar los registros clínicos. Intente refrescar.', type: 'error' });
             } else if (data) {
+                console.log('[NurseDashboard] fetchRecords: registros obtenidos:', data.length);
                 setRecords(data);
             }
         } catch (err) {
-            console.error('Unexpected error fetching clinical records:', err);
+            console.error('[NurseDashboard] fetchRecords: excepción inesperada (red/CORS)', err);
             setNotification({ message: 'Error de red o conexión al cargar los registros.', type: 'error' });
         } finally {
             setIsLoading(false);
         }
-    }, []);
+    }, [profile?.id]);
 
     useEffect(() => {
+        console.log('[NurseDashboard] useEffect: authLoading=', authLoading, '| records=', records.length, '| isLoading=', isLoading);
+        if (authLoading) return;
         fetchRecords();
 
         // Realtime subscription
@@ -77,7 +81,7 @@ export default function NurseDashboard() {
         return () => {
             supabase.removeChannel(channel);
         };
-    }, [fetchRecords]);
+    }, [fetchRecords, authLoading]);
 
     const handleValidate = async (recordId: string) => {
         const level = validationState[recordId];
