@@ -8,7 +8,7 @@
 import { extractJSON } from './validation';
 
 export interface TriageResponsePayload {
-    status: 'success' | 'needs_info' | 'error';
+    status?: 'success' | 'needs_info' | 'error' | string;
     esi_level: number | null;
     reasoning?: string;
     suggested_action?: string;
@@ -16,6 +16,50 @@ export interface TriageResponsePayload {
     response_options?: string[];
     error?: boolean;
     message?: string;
+}
+
+function hasActionableFollowUp(payload: TriageResponsePayload): boolean {
+    const q = payload.follow_up_question;
+    if (typeof q === 'string' && q.trim().length > 0) return true;
+    if (Array.isArray(payload.response_options)) {
+        const nonEmpty = payload.response_options.filter(
+            (o) => typeof o === 'string' && o.trim().length > 0,
+        );
+        if (nonEmpty.length > 0) return true;
+    }
+    return false;
+}
+
+/**
+ * True when a parsed assistant payload represents a final triage
+ * classification that the UI should finalize on.
+ *
+ * The model is *supposed* to emit `status: 'success'` for terminal
+ * turns, but in practice it sometimes drops the status field, sends a
+ * variant ('complete', 'done', etc.) or wraps the JSON in prose. We
+ * treat any payload with a valid ESI level (1..5) and no actionable
+ * follow-up as terminal — that's what the patient sees on screen.
+ *
+ * Errors and `needs_info` turns are explicitly excluded.
+ */
+export function isTerminalTriageResult(
+    payload: TriageResponsePayload | null | undefined,
+): boolean {
+    if (!payload) return false;
+    if (payload.error === true) return false;
+    if (payload.status === 'error') return false;
+    if (payload.status === 'needs_info') return false;
+    const lvl = payload.esi_level;
+    if (
+        typeof lvl !== 'number' ||
+        !Number.isInteger(lvl) ||
+        lvl < 1 ||
+        lvl > 5
+    ) {
+        return false;
+    }
+    if (hasActionableFollowUp(payload)) return false;
+    return true;
 }
 
 export interface RenderedAssistant {
@@ -49,11 +93,13 @@ export function renderAssistantContent(
             payload.status === 'needs_info'
                 ? payload.follow_up_question || payload.suggested_action || ''
                 : payload.suggested_action || payload.message || '';
-        const options = Array.isArray(payload.response_options)
-            ? payload.response_options.filter(
-                  (o) => typeof o === 'string' && o.trim().length > 0,
-              )
-            : undefined;
+        const terminal = isTerminalTriageResult(payload);
+        const options =
+            !terminal && Array.isArray(payload.response_options)
+                ? payload.response_options.filter(
+                      (o) => typeof o === 'string' && o.trim().length > 0,
+                  )
+                : undefined;
         return {
             hideBubble: false,
             content: visibleText || '',
