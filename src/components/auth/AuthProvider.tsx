@@ -48,6 +48,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
             return;
         }
 
+        // Safety net: if getInitialSession hangs (network/CORS in production),
+        // force loading=false after 8 s so downstream guards don't block forever.
+        const safetyTimer = setTimeout(() => {
+            console.warn('[AuthProvider] getInitialSession timeout — forcing loading=false');
+            setLoading(false);
+        }, 8000);
+
         // Get initial session
         async function getInitialSession() {
             try {
@@ -74,6 +81,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
             } catch (err) {
                 console.error('Auth session error:', err);
             } finally {
+                clearTimeout(safetyTimer);
                 setLoading(false);
             }
         }
