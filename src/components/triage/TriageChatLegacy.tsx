@@ -21,13 +21,17 @@
  * input) — uses plain divs + an inline error banner.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat } from 'ai/react';
 import { Bot, Send, Loader2, AlertTriangle, RefreshCw } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase/client';
 import { generateAnonymousCode } from '@/lib/utils/anonymousCode';
 import { extractJSON } from '@/lib/utils/validation';
 import { renderAssistantContent } from '@/lib/utils/triageRender';
+import {
+    buildClinicalRecordPayload,
+    type ClinicalRecordPayload,
+} from '@/lib/utils/clinicalRecord';
 
 interface TriageResponse {
     status: 'success' | 'needs_info' | 'error';
@@ -94,7 +98,38 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
     const [isFinished, setIsFinished] = useState(false);
     const [anonymousCode, setAnonymousCode] = useState<string | null>(null);
     const [answeredOptions, setAnsweredOptions] = useState<Record<string, string>>({});
+    const [saveError, setSaveError] = useState<string | null>(null);
+    const [isSaving, setIsSaving] = useState(false);
+    const pendingPayloadRef = useRef<ClinicalRecordPayload | null>(null);
+    const demographicsRef = useRef(demographics);
     const messagesEndRef = useRef<HTMLDivElement>(null);
+
+    // Keep demographics ref in sync so the streaming-finish callback never
+    // reads a stale closure value.
+    useEffect(() => {
+        demographicsRef.current = demographics;
+    }, [demographics]);
+
+    const messagesRef = useRef<Array<{ role: string; content: string }>>([]);
+
+    const persistRecord = useCallback(
+        async (payload: ClinicalRecordPayload): Promise<void> => {
+            if (!isSupabaseConfigured) {
+                console.warn(
+                    '[triage] Supabase not configured; skipping clinical record persistence',
+                );
+                return;
+            }
+            const { error: dbError } = await supabase
+                .from('clinical_records')
+                .insert(payload as never);
+            if (dbError) {
+                console.error('Error saving record:', dbError);
+                throw new Error(dbError.message || 'insert failed');
+            }
+        },
+        [],
+    );
 
     const {
         messages,
@@ -112,43 +147,52 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
                 const json = extractJSON<TriageResponse>(message.content);
                 if (!json) return;
                 if (json.error || json.status === 'error') return;
+                if (json.status !== 'success' || !json.esi_level) return;
 
-                if (json.status === 'success' && json.esi_level) {
-                    const code = generateAnonymousCode();
-                    setAnonymousCode(code);
-
-                    if (isSupabaseConfigured) {
-                        const symptomsText = messages
-                            .filter((m) => m.role === 'user')
-                            .map((m) => m.content)
-                            .join('\n');
-                        const conversationHistory = messages.map((m) => ({
-                            role: m.role === 'user' ? 'patient' : 'ai',
-                            content: m.content,
-                        }));
-
-                        const { error: dbError } = await supabase
-                            .from('clinical_records')
-                            .insert({
-                                patient_consent: true,
-                                symptoms_text: symptomsText,
-                                ai_response: json as unknown as Record<string, unknown>,
-                                esi_level: json.esi_level,
-                                nurse_validated: false,
-                                anonymous_code: code,
-                                patient_gender: demographics.gender,
-                                patient_age_group: demographics.ageGroup,
-                                conversation_history: conversationHistory,
-                            } as never);
-
-                        if (dbError) console.error('Error saving record:', dbError);
-                    } else {
-                        console.warn(
-                            '[triage] Supabase not configured; skipping clinical record persistence',
-                        );
-                    }
+                const code = generateAnonymousCode();
+                const currentDemographics = demographicsRef.current;
+                // messagesRef is updated on every render and always reflects
+                // the latest streamed transcript — plus the just-completed
+                // assistant turn is appended below so we never persist with
+                // an empty assistant payload.
+                const transcript = [
+                    ...messagesRef.current,
+                ];
+                const lastMessage = transcript[transcript.length - 1];
+                if (
+                    !lastMessage ||
+                    lastMessage.role !== 'assistant' ||
+                    lastMessage.content !== message.content
+                ) {
+                    transcript.push({
+                        role: 'assistant',
+                        content: message.content,
+                    });
+                }
+                const payload = buildClinicalRecordPayload({
+                    messages: transcript,
+                    aiResponse: json as unknown as Record<string, unknown>,
+                    esiLevel: json.esi_level,
+                    anonymousCode: code,
+                    gender: currentDemographics.gender,
+                    ageGroup: currentDemographics.ageGroup,
+                });
+                pendingPayloadRef.current = payload;
+                setAnonymousCode(code);
+                setSaveError(null);
+                setIsSaving(true);
+                try {
+                    await persistRecord(payload);
+                    pendingPayloadRef.current = null;
                     setIsFinished(true);
-                    onFinished?.(code, demographics);
+                    onFinished?.(code, currentDemographics);
+                } catch (e) {
+                    const msg = e instanceof Error ? e.message : 'desconocido';
+                    setSaveError(
+                        `No se pudo guardar la evaluación (${msg}). Sus datos están listos; puede reintentar el guardado.`,
+                    );
+                } finally {
+                    setIsSaving(false);
                 }
             } catch (e) {
                 console.error('Error parsing AI response:', e);
@@ -156,9 +200,36 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
         },
     });
 
+    const handleSaveRetry = useCallback(async () => {
+        const payload = pendingPayloadRef.current;
+        if (!payload || isSaving) return;
+        setSaveError(null);
+        setIsSaving(true);
+        try {
+            await persistRecord(payload);
+            pendingPayloadRef.current = null;
+            setIsFinished(true);
+            onFinished?.(payload.anonymous_code, demographicsRef.current);
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : 'desconocido';
+            setSaveError(
+                `No se pudo guardar la evaluación (${msg}). Sus datos están listos; puede reintentar el guardado.`,
+            );
+        } finally {
+            setIsSaving(false);
+        }
+    }, [isSaving, onFinished, persistRecord]);
+
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages, preMessages, isLoading]);
+
+    useEffect(() => {
+        messagesRef.current = messages.map((m) => ({
+            role: m.role,
+            content: m.content,
+        }));
+    }, [messages]);
 
     const pushPre = (msg: Omit<PreMessage, 'id'>) => {
         setPreMessages((prev) => [
@@ -330,6 +401,36 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
 
                     {/* Typing indicator */}
                     {isLoading && <TypingIndicator />}
+
+                    {/* Save-error banner — shown when the AI finished but the
+                        Supabase insert failed. Lets the patient retry the save
+                        without re-running the AI. */}
+                    {saveError && (
+                        <div role="alert" className="flex justify-start">
+                            <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-2xl px-5 py-4 flex flex-col gap-3 max-w-[85%]">
+                                <div className="flex items-center gap-2">
+                                    <AlertTriangle className="w-5 h-5" />
+                                    <span className="font-bold text-sm">
+                                        Error al guardar la evaluación
+                                    </span>
+                                </div>
+                                <p className="text-sm leading-relaxed">{saveError}</p>
+                                <button
+                                    type="button"
+                                    onClick={handleSaveRetry}
+                                    disabled={isSaving}
+                                    className="self-start inline-flex items-center gap-2 text-sm font-bold bg-amber-600 text-white px-4 py-2 rounded-full hover:bg-amber-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+                                >
+                                    {isSaving ? (
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                    ) : (
+                                        <RefreshCw className="w-4 h-4" />
+                                    )}
+                                    Reintentar guardado
+                                </button>
+                            </div>
+                        </div>
+                    )}
 
                     {/* Error / fallback banner with retry */}
                     {showErrorBanner && (
