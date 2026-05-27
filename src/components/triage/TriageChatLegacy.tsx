@@ -21,13 +21,17 @@
  * input) — uses plain divs + an inline error banner.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat } from 'ai/react';
 import { Bot, Send, Loader2, AlertTriangle, RefreshCw } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase/client';
 import { generateAnonymousCode } from '@/lib/utils/anonymousCode';
 import { extractJSON } from '@/lib/utils/validation';
 import { renderAssistantContent } from '@/lib/utils/triageRender';
+import {
+    buildClinicalRecordPayload,
+    type ClinicalRecordPayload,
+} from '@/lib/utils/clinicalRecord';
 
 interface TriageResponse {
     status: 'success' | 'needs_info' | 'error';
@@ -94,7 +98,48 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
     const [isFinished, setIsFinished] = useState(false);
     const [anonymousCode, setAnonymousCode] = useState<string | null>(null);
     const [answeredOptions, setAnsweredOptions] = useState<Record<string, string>>({});
+    const [pendingSave, setPendingSave] = useState<ClinicalRecordPayload | null>(null);
+    const [saveError, setSaveError] = useState<string | null>(null);
+    const [isSaving, setIsSaving] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
+
+    // Mirror demographics in a ref so onFinish can read the up-to-date
+    // values without re-registering the useChat callback on every change.
+    const demographicsRef = useRef(demographics);
+    useEffect(() => {
+        demographicsRef.current = demographics;
+    }, [demographics]);
+
+    const persistClinicalRecord = useCallback(
+        async (payload: ClinicalRecordPayload): Promise<string | null> => {
+            if (!isSupabaseConfigured) {
+                console.warn(
+                    '[triage] Supabase not configured; skipping clinical record persistence',
+                );
+                return null;
+            }
+            const { error: dbError } = await supabase
+                .from('clinical_records')
+                .insert(payload as never);
+            if (dbError) {
+                console.error('[triage] Error saving record:', dbError);
+                return (
+                    'No pudimos guardar su evaluación en este momento. ' +
+                    'Por favor, reintente o avise al personal de enfermería ' +
+                    'para registrar su caso manualmente.'
+                );
+            }
+            return null;
+        },
+        [],
+    );
+
+    // A ref kept in sync with the latest `messages` array so the
+    // useChat `onFinish` callback can read the up-to-date conversation —
+    // the callback's own closure is stale across streaming tokens, which
+    // is why earlier versions persisted symptoms_text="" and
+    // conversation_history=[] even when the patient had typed symptoms.
+    const messagesRef = useRef<Array<{ id: string; role: string; content: string }>>([]);
 
     const {
         messages,
@@ -107,54 +152,76 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
         append,
     } = useChat({
         api: '/api/triage',
-        onFinish: async (message) => {
-            try {
-                const json = extractJSON<TriageResponse>(message.content);
-                if (!json) return;
-                if (json.error || json.status === 'error') return;
-
-                if (json.status === 'success' && json.esi_level) {
-                    const code = generateAnonymousCode();
-                    setAnonymousCode(code);
-
-                    if (isSupabaseConfigured) {
-                        const symptomsText = messages
-                            .filter((m) => m.role === 'user')
-                            .map((m) => m.content)
-                            .join('\n');
-                        const conversationHistory = messages.map((m) => ({
-                            role: m.role === 'user' ? 'patient' : 'ai',
-                            content: m.content,
-                        }));
-
-                        const { error: dbError } = await supabase
-                            .from('clinical_records')
-                            .insert({
-                                patient_consent: true,
-                                symptoms_text: symptomsText,
-                                ai_response: json as unknown as Record<string, unknown>,
-                                esi_level: json.esi_level,
-                                nurse_validated: false,
-                                anonymous_code: code,
-                                patient_gender: demographics.gender,
-                                patient_age_group: demographics.ageGroup,
-                                conversation_history: conversationHistory,
-                            } as never);
-
-                        if (dbError) console.error('Error saving record:', dbError);
-                    } else {
-                        console.warn(
-                            '[triage] Supabase not configured; skipping clinical record persistence',
-                        );
-                    }
-                    setIsFinished(true);
-                    onFinished?.(code, demographics);
-                }
-            } catch (e) {
-                console.error('Error parsing AI response:', e);
+        onFinish: async (message, { finishReason }) => {
+            if (finishReason && finishReason !== 'stop' && finishReason !== 'length') {
+                // Provider error or content filter — leave the chat in its
+                // current state so the existing error banner offers retry.
+                return;
             }
+            const json = extractJSON<TriageResponse>(message.content);
+            if (!json) return;
+            if (json.error || json.status === 'error') return;
+            if (json.status !== 'success' || !json.esi_level) return;
+
+            // Splice the just-finished assistant turn onto the live
+            // messages snapshot — useChat may not have committed the
+            // final message to state yet when onFinish fires.
+            const live = messagesRef.current;
+            const fullHistory = live.some((m) => m.id === message.id)
+                ? live
+                : [...live, { id: message.id, role: 'assistant', content: message.content }];
+
+            const code = anonymousCode ?? generateAnonymousCode();
+            if (!anonymousCode) setAnonymousCode(code);
+
+            const payload = buildClinicalRecordPayload({
+                messages: fullHistory as never,
+                demographics: demographicsRef.current,
+                anonymousCode: code,
+                aiResponse: json,
+            });
+
+            if (!payload) {
+                setSaveError(
+                    'No se capturaron síntomas suficientes para registrar la evaluación. ' +
+                        'Por favor, describa nuevamente sus síntomas o avise al personal.',
+                );
+                return;
+            }
+
+            setPendingSave(payload);
+            setIsSaving(true);
+            const errMsg = await persistClinicalRecord(payload);
+            setIsSaving(false);
+            if (errMsg) {
+                setSaveError(errMsg);
+                return;
+            }
+            setPendingSave(null);
+            setSaveError(null);
+            setIsFinished(true);
+            onFinished?.(code, demographicsRef.current);
         },
     });
+
+    useEffect(() => {
+        messagesRef.current = messages as never;
+    }, [messages]);
+
+    const retrySave = useCallback(async () => {
+        if (!pendingSave || isSaving) return;
+        setIsSaving(true);
+        setSaveError(null);
+        const errMsg = await persistClinicalRecord(pendingSave);
+        setIsSaving(false);
+        if (errMsg) {
+            setSaveError(errMsg);
+            return;
+        }
+        setPendingSave(null);
+        setIsFinished(true);
+        if (anonymousCode) onFinished?.(anonymousCode, demographicsRef.current);
+    }, [pendingSave, isSaving, persistClinicalRecord, anonymousCode, onFinished]);
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -353,6 +420,38 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
                                     <RefreshCw className="w-4 h-4" />
                                     Reintentar
                                 </button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Save-error banner — surfaces Supabase insert failures
+                        so the patient never sees "Evaluación Finalizada" with
+                        a tracking code that was never persisted. */}
+                    {saveError && !isFinished && (
+                        <div role="alert" className="flex justify-start">
+                            <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-2xl px-5 py-4 flex flex-col gap-3 max-w-[85%]">
+                                <div className="flex items-center gap-2">
+                                    <AlertTriangle className="w-5 h-5" />
+                                    <span className="font-bold text-sm">
+                                        No se pudo guardar la evaluación
+                                    </span>
+                                </div>
+                                <p className="text-sm leading-relaxed">{saveError}</p>
+                                {pendingSave && (
+                                    <button
+                                        type="button"
+                                        onClick={retrySave}
+                                        disabled={isSaving}
+                                        className="self-start inline-flex items-center gap-2 text-sm font-bold bg-amber-600 text-white px-4 py-2 rounded-full hover:bg-amber-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        {isSaving ? (
+                                            <Loader2 className="w-4 h-4 animate-spin" />
+                                        ) : (
+                                            <RefreshCw className="w-4 h-4" />
+                                        )}
+                                        Reintentar guardar
+                                    </button>
+                                )}
                             </div>
                         </div>
                     )}
