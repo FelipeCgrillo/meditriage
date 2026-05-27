@@ -80,29 +80,20 @@ export const STREAM_UNPARSEABLE_FALLBACK =
  * would briefly flash braces/keys to the patient. We therefore hide
  * the bubble entirely until a balanced JSON object is available (or
  * the stream settles into a recognisable shape).
- *
- * `isFinalizing` suppresses the terminal assistant bubble while the
- * caller is persisting the result and about to swap in the success
- * screen — without it the user briefly sees the final clinical message
- * before the FinishedScreen replaces the chat.
  */
 export function renderAssistantContent(
     raw: string,
     isStreaming: boolean,
     isLatest: boolean,
-    isFinalizing: boolean = false,
 ): RenderedAssistant {
     const payload = extractJSON<TriageResponsePayload>(raw);
 
     if (payload) {
-        const terminal = isTerminalTriageResult(payload);
-        if (terminal && isFinalizing && isLatest) {
-            return { hideBubble: true, content: '' };
-        }
         const visibleText =
             payload.status === 'needs_info'
                 ? payload.follow_up_question || payload.suggested_action || ''
                 : payload.suggested_action || payload.message || '';
+        const terminal = isTerminalTriageResult(payload);
         const options =
             !terminal && Array.isArray(payload.response_options)
                 ? payload.response_options.filter(
