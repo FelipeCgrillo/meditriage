@@ -120,66 +120,6 @@ const cases: TestCase[] = [
         },
     },
     {
-        name: 'hides terminal bubble while finalizing (saving) to prevent flicker',
-        run: () => {
-            const raw = JSON.stringify({
-                status: 'success',
-                esi_level: 2,
-                suggested_action:
-                    'Acuda al servicio de urgencias inmediatamente.',
-            });
-            const r = renderAssistantContent(raw, false, true, true);
-            assert(r.hideBubble === true, 'terminal bubble must be hidden during finalize');
-            assert(r.content === '', 'no content should leak during finalize');
-        },
-    },
-    {
-        name: 'still renders terminal bubble when not finalizing (save failed / no save)',
-        run: () => {
-            const raw = JSON.stringify({
-                status: 'success',
-                esi_level: 2,
-                suggested_action:
-                    'Acuda al servicio de urgencias inmediatamente.',
-            });
-            const r = renderAssistantContent(raw, false, true, false);
-            assert(r.hideBubble === false, 'must show terminal bubble when not finalizing');
-            assert(
-                r.content.includes('urgencias'),
-                'suggested_action must render when finalize flag is off',
-            );
-        },
-    },
-    {
-        name: 'finalize flag does NOT hide needs_info follow-up bubble',
-        run: () => {
-            const raw = JSON.stringify({
-                status: 'needs_info',
-                follow_up_question: '¿Desde cuándo presenta el síntoma?',
-                response_options: ['Hoy', 'Hace 2 días'],
-                esi_level: null,
-            });
-            const r = renderAssistantContent(raw, false, true, true);
-            assert(r.hideBubble === false, 'needs_info must render even when finalizing');
-            assert(r.options?.length === 2, 'options preserved on needs_info under finalize');
-        },
-    },
-    {
-        name: 'finalize flag does not affect non-latest assistant messages',
-        run: () => {
-            const raw = JSON.stringify({
-                status: 'success',
-                esi_level: 3,
-                suggested_action: 'Acuda al CESFAM en las próximas horas.',
-            });
-            const r = renderAssistantContent(raw, false, false, true);
-            assert(
-                r.hideBubble === false,
-                'older terminal messages must remain visible during finalize',
-            );
-        },
-    },
-    {
         name: 'preserves response_options filtering of empty strings',
         run: () => {
             const raw = JSON.stringify({

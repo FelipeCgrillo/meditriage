@@ -382,18 +382,8 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
                     {/* AI conversation messages (after consent flow) */}
                     {messages.map((m, idx) => {
                         const isUser = m.role === 'user';
-                        // Suppress the terminal assistant bubble while we are
-                        // persisting and about to swap in the FinishedScreen —
-                        // unless the save failed, in which case the user needs
-                        // to see the result again alongside the retry banner.
-                        const isFinalizing = isSaving && !saveError;
                         const rendered = !isUser
-                            ? renderAssistantContent(
-                                  m.content,
-                                  isLoading,
-                                  idx === lastAssistantIdx,
-                                  isFinalizing,
-                              )
+                            ? renderAssistantContent(m.content, isLoading, idx === lastAssistantIdx)
                             : null;
 
                         // Suppress the assistant bubble while the JSON payload is
@@ -419,12 +409,6 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
 
                     {/* Typing indicator */}
                     {isLoading && <TypingIndicator />}
-
-                    {/* Saving indicator — shown after the stream finishes
-                        while the Supabase insert is in flight, so the
-                        patient never sees the terminal clinical bubble
-                        flicker before the FinishedScreen appears. */}
-                    {!isLoading && isSaving && !saveError && <SavingIndicator />}
 
                     {/* Save-error banner — shown when the AI finished but the
                         Supabase insert failed. Lets the patient retry the save
@@ -665,24 +649,6 @@ function TypingIndicator() {
                         style={{ animationDelay: '300ms' }}
                     />
                 </div>
-            </div>
-        </div>
-    );
-}
-
-function SavingIndicator() {
-    return (
-        <div
-            role="status"
-            aria-live="polite"
-            aria-label="Guardando evaluación"
-            className="flex justify-start animate-in fade-in-50 slide-in-from-bottom-2 duration-300"
-        >
-            <div className="flex items-center gap-3 bg-white rounded-[24px] rounded-bl-sm px-4 md:px-5 py-3 md:py-3.5 shadow-sm">
-                <Loader2 className="w-4 h-4 md:w-5 md:h-5 text-indigo-500 animate-spin" />
-                <span className="text-xs md:text-sm text-slate-600 font-medium">
-                    Guardando evaluación...
-                </span>
             </div>
         </div>
     );
