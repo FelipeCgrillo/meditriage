@@ -81,6 +81,20 @@ export default function NurseDashboard() {
         hasFetchedRef.current = true;
 
         let cancelled = false;
+
+        // HARD SAFETY NET: no matter what happens below, the spinner is gone
+        // within 12s. The user will either see records, the empty state, or a
+        // fetch error banner — never an infinite spinner.
+        const safetyTimer = setTimeout(() => {
+            if (cancelled) return;
+            setInitialLoading((prev) => {
+                if (prev) {
+                    console.warn('[nurse/dashboard] safety timer fired: forcing initialLoading=false');
+                }
+                return false;
+            });
+        }, 12000);
+
         (async () => {
             try {
                 const result = await getSessionWithTimeout(6000);
@@ -116,6 +130,7 @@ export default function NurseDashboard() {
 
         return () => {
             cancelled = true;
+            clearTimeout(safetyTimer);
         };
     }, [fetchRecords]);
 
@@ -164,10 +179,18 @@ export default function NurseDashboard() {
         };
     }, [session, fetchRecords]);
 
-    // Listen for token refreshes so realtime + queries always have a fresh JWT.
+    // Listen for token refreshes so realtime always has a fresh JWT.
+    // IMPORTANT: only update session on real auth changes (token refresh,
+    // sign-in, sign-out). We deliberately ignore INITIAL_SESSION here because
+    // it re-fires on hydration and would otherwise tear down + recreate the
+    // realtime channel for no reason — which was producing duplicate fetches
+    // and, in some cases, leaving the UI re-suspended on a stale state.
     useEffect(() => {
-        const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
-            setSession(newSession);
+        const { data: sub } = supabase.auth.onAuthStateChange((event, newSession) => {
+            if (event === 'INITIAL_SESSION') return;
+            if (event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN' || event === 'SIGNED_OUT') {
+                setSession(newSession);
+            }
         });
         return () => sub.subscription.unsubscribe();
     }, []);
