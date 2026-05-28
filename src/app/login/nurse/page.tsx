@@ -11,7 +11,6 @@ function NurseLoginForm() {
     const [loading, setLoading] = useState(false);
     const router = useRouter();
     const searchParams = useSearchParams();
-    // Default to /nurse/dashboard (there is no /nurse route).
     const redirectTo = searchParams.get('redirect') || '/nurse/dashboard';
 
     async function handleLogin(e: React.FormEvent) {
@@ -25,24 +24,18 @@ function NurseLoginForm() {
                 password,
             });
 
-            if (signInError) {
+            if (signInError || !data.user) {
                 setError('Credenciales incorrectas. Verifica tu email y contraseña.');
                 setLoading(false);
                 return;
             }
 
-            if (!data.user) {
-                setError('No se pudo iniciar sesión. Intenta nuevamente.');
-                setLoading(false);
-                return;
-            }
-
-            // Verify user has nurse role
+            // Verifica rol nurse/admin
             const { data: profile, error: profileError } = await supabase
                 .from('user_profiles')
                 .select('role')
                 .eq('id', data.user.id)
-                .single();
+                .maybeSingle();
 
             if (profileError || !profile) {
                 setError('Tu cuenta no tiene un perfil configurado. Contacta al administrador.');
@@ -58,12 +51,11 @@ function NurseLoginForm() {
                 return;
             }
 
-            // Success — use a hard navigation so the request goes through
-            // the middleware with the fresh auth cookie. Using router.push +
-            // router.refresh() was racing the cookie write and bouncing the
-            // user back to /login (the cause of the infinite spinner).
+            // Hard navigation para que el middleware vea las cookies recién escritas
+            // por @supabase/ssr (evita race condition con router.push).
             window.location.assign(redirectTo);
         } catch (err) {
+            console.error('Login error:', err);
             setError('Error inesperado. Intenta nuevamente.');
             setLoading(false);
         }
@@ -71,18 +63,16 @@ function NurseLoginForm() {
 
     return (
         <div className="w-full max-w-md">
-            {/* Header */}
             <div className="text-center mb-8">
-                <div className="inline-flex items-center justify-center w-16 h-16 bg-teal-100 rounded-full mb-4">
-                    <svg className="w-8 h-8 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                <div className="inline-flex items-center justify-center w-16 h-16 bg-emerald-100 rounded-full mb-4">
+                    <svg className="w-8 h-8 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
                     </svg>
                 </div>
                 <h1 className="text-2xl font-bold text-gray-900">Panel de Enfermería</h1>
-                <p className="text-gray-600 mt-2">Ingresa tus credenciales para acceder</p>
+                <p className="text-gray-600 mt-2">Acceso para personal clínico</p>
             </div>
 
-            {/* Login Form */}
             <div className="bg-white rounded-2xl shadow-xl p-8 border border-gray-100">
                 <form onSubmit={handleLogin} className="space-y-6">
                     {error && (
@@ -101,8 +91,9 @@ function NurseLoginForm() {
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
                             required
-                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition-colors"
-                            placeholder="enfermera@cesfam.cl"
+                            autoComplete="username"
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors"
+                            placeholder="enfermera@hospital.cl"
                         />
                     </div>
 
@@ -116,7 +107,8 @@ function NurseLoginForm() {
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
                             required
-                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition-colors"
+                            autoComplete="current-password"
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors"
                             placeholder="••••••••"
                         />
                     </div>
@@ -124,7 +116,7 @@ function NurseLoginForm() {
                     <button
                         type="submit"
                         disabled={loading}
-                        className="w-full bg-teal-600 hover:bg-teal-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                        className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                     >
                         {loading ? (
                             <>
@@ -141,9 +133,8 @@ function NurseLoginForm() {
                 </form>
             </div>
 
-            {/* Footer */}
             <p className="text-center text-gray-500 text-sm mt-6">
-                Sistema de Triaje ESI - Acceso restringido
+                Sistema de Triage Asistido por IA
             </p>
         </div>
     );
@@ -151,10 +142,10 @@ function NurseLoginForm() {
 
 export default function NurseLoginPage() {
     return (
-        <div className="min-h-screen bg-gradient-to-br from-teal-50 via-white to-cyan-50 flex items-center justify-center p-4">
+        <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-teal-50 flex items-center justify-center p-4">
             <Suspense fallback={
                 <div className="w-full max-w-md text-center">
-                    <div className="animate-spin w-8 h-8 border-4 border-teal-600 border-t-transparent rounded-full mx-auto"></div>
+                    <div className="animate-spin w-8 h-8 border-4 border-emerald-600 border-t-transparent rounded-full mx-auto"></div>
                 </div>
             }>
                 <NurseLoginForm />

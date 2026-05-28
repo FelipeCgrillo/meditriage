@@ -57,9 +57,9 @@ function ResultadosLoginForm() {
                 return;
             }
 
-            // Success — hard navigation so middleware sees the fresh auth
-            // cookie (router.push raced the cookie write and looped).
-            window.location.assign(redirectTo);
+            // Success - redirect to results dashboard
+            router.push(redirectTo);
+            router.refresh();
         } catch (err) {
             setError('Error inesperado. Intenta nuevamente.');
             setLoading(false);

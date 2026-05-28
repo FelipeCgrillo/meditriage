@@ -61,7 +61,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
                             .from('user_profiles')
                             .select('*')
                             .eq('id', session.user.id)
-                            .maybeSingle();
+                            .single();
 
                         if (!error && profileData) {
                             setProfile(profileData as UserProfile);
@@ -92,7 +92,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
                             .from('user_profiles')
                             .select('*')
                             .eq('id', session.user.id)
-                            .maybeSingle();
+                            .single();
 
                         if (!error && profileData) {
                             setProfile(profileData as UserProfile);
