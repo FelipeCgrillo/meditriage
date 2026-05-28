@@ -47,7 +47,7 @@ export async function getCurrentUserProfile() {
         .from('user_profiles')
         .select('*')
         .eq('id', user.id)
-        .single();
+        .maybeSingle();
 
     if (profileError || !profile) {
         return null;
