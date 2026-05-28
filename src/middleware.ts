@@ -29,39 +29,43 @@ export async function middleware(request: NextRequest) {
         }
     );
 
-    // Refresh session if expired
+    // IMPORTANT: getUser() actually validates the JWT and refreshes the cookie
+    // if expired. Do not remove or replace with getSession().
     const {
         data: { user },
     } = await supabase.auth.getUser();
 
     const pathname = request.nextUrl.pathname;
 
-    // Define protected routes and their required roles
+    // Define protected routes and their required roles.
+    // Order matters: more specific paths must be checked before their parents
+    // (so `/nurse/dashboard` matches before `/nurse`). We sort by length desc.
     const protectedRoutes: Record<string, string[]> = {
-        '/nurse': ['nurse', 'admin'],
         '/nurse/dashboard': ['nurse', 'admin'],
+        '/nurse': ['nurse', 'admin'],
         '/resultados': ['researcher', 'admin'],
     };
 
-    // Check if the current path is protected
-    const matchedRoute = Object.keys(protectedRoutes).find(route =>
-        pathname.startsWith(route)
-    );
+    const matchedRoute = Object.keys(protectedRoutes)
+        .sort((a, b) => b.length - a.length)
+        .find(route => pathname === route || pathname.startsWith(route + '/'));
 
     if (matchedRoute) {
-        // User not authenticated - redirect to appropriate login
+        // Not authenticated -> bounce to the right login page, carrying the
+        // intended destination in `redirect`.
         if (!user) {
-            const loginPath = matchedRoute === '/nurse'
+            const loginPath = matchedRoute.startsWith('/nurse')
                 ? '/login/nurse'
                 : '/login/resultados';
 
             const url = request.nextUrl.clone();
             url.pathname = loginPath;
+            url.search = ''; // strip any pre-existing params
             url.searchParams.set('redirect', pathname);
             return NextResponse.redirect(url);
         }
 
-        // Get user's role from profile
+        // Authenticated -> verify role.
         const { data: profile } = await supabase
             .from('user_profiles')
             .select('role')
@@ -71,18 +75,18 @@ export async function middleware(request: NextRequest) {
         const allowedRoles = protectedRoutes[matchedRoute];
 
         if (!profile || !allowedRoles.includes(profile.role)) {
-            // User doesn't have the required role
             const url = request.nextUrl.clone();
             url.pathname = '/unauthorized';
+            url.search = '';
             return NextResponse.redirect(url);
         }
     }
 
-    // Redirect authenticated users away from login pages
+    // Authenticated users hitting a /login/* page get bounced to the place
+    // they were originally going (if it was passed via ?redirect=) or to
+    // their role's default dashboard. THIS USED TO IGNORE ?redirect= which
+    // caused a redirect loop right after sign-in.
     if (user && pathname.startsWith('/login')) {
-        const url = request.nextUrl.clone();
-
-        // Get user's role to redirect to appropriate dashboard
         const { data: profile } = await supabase
             .from('user_profiles')
             .select('role')
@@ -90,13 +94,31 @@ export async function middleware(request: NextRequest) {
             .single();
 
         if (profile) {
-            if (profile.role === 'nurse' || profile.role === 'admin') {
-                url.pathname = '/nurse/dashboard';
-            } else if (profile.role === 'researcher') {
-                url.pathname = '/resultados';
-            } else {
-                url.pathname = '/';
+            // 1) Honor an explicit ?redirect= if it points at a safe internal path.
+            const requested = request.nextUrl.searchParams.get('redirect');
+            const safeRequested =
+                requested && requested.startsWith('/') && !requested.startsWith('//')
+                    ? requested
+                    : null;
+
+            // 2) Otherwise fall back to the role's default dashboard.
+            const fallback =
+                profile.role === 'nurse' || profile.role === 'admin'
+                    ? '/nurse/dashboard'
+                    : profile.role === 'researcher'
+                    ? '/resultados'
+                    : '/';
+
+            // 3) If we are ALREADY on the destination, do not redirect — that
+            //    is the actual cause of the infinite loop right after login.
+            const target = safeRequested || fallback;
+            if (pathname === target) {
+                return supabaseResponse;
             }
+
+            const url = request.nextUrl.clone();
+            url.pathname = target;
+            url.search = '';
             return NextResponse.redirect(url);
         }
     }

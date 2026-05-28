@@ -57,9 +57,11 @@ function NurseLoginForm() {
                 return;
             }
 
-            // Success - redirect to nurse dashboard
-            router.push(redirectTo);
-            router.refresh();
+            // Success — use a hard navigation so the request goes through
+            // the middleware with the fresh auth cookie. Using router.push +
+            // router.refresh() was racing the cookie write and bouncing the
+            // user back to /login (the cause of the infinite spinner).
+            window.location.assign(redirectTo);
         } catch (err) {
             setError('Error inesperado. Intenta nuevamente.');
             setLoading(false);
