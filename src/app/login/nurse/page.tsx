@@ -11,7 +11,8 @@ function NurseLoginForm() {
     const [loading, setLoading] = useState(false);
     const router = useRouter();
     const searchParams = useSearchParams();
-    const redirectTo = searchParams.get('redirect') || '/nurse';
+    // Default to /nurse/dashboard (there is no /nurse route).
+    const redirectTo = searchParams.get('redirect') || '/nurse/dashboard';
 
     async function handleLogin(e: React.FormEvent) {
         e.preventDefault();
