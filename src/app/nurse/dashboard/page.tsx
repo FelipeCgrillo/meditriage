@@ -7,24 +7,57 @@ import { Activity, Eye, EyeOff, CheckCircle, AlertTriangle, LogOut, RefreshCw, C
 import { Button } from '@/components/ui/Button';
 import type { ClinicalRecord } from '@/lib/supabase/types';
 import type { TriageResult } from '@/lib/ai/schemas';
+import type { Session } from '@supabase/supabase-js';
+
+// Bootstrap helper that does NOT rely on AuthProvider. We discovered that
+// when the provider stays in loading=true forever (e.g. profile fetch hangs
+// or throws) the dashboard never reached its first useEffect. This version
+// reads the session directly from the Supabase browser client with a hard
+// timeout, so the page can never get stuck on the spinner without telling
+// the user *why*.
+async function getSessionWithTimeout(timeoutMs = 6000): Promise<Session | null | { __timeout: true }> {
+    return Promise.race([
+        supabase.auth.getSession().then(({ data }) => data.session ?? null),
+        new Promise<{ __timeout: true }>((resolve) =>
+            setTimeout(() => resolve({ __timeout: true }), timeoutMs)
+        ),
+    ]) as Promise<Session | null | { __timeout: true }>;
+}
 
 export default function NurseDashboard() {
-    const { profile, session, loading: authLoading } = useAuth();
+    // We still consume the provider, but only for the profile display.
+    // The dashboard's data flow no longer depends on it.
+    const auth = useAuth();
     const [records, setRecords] = useState<ClinicalRecord[]>([]);
     const [initialLoading, setInitialLoading] = useState(true);
+    const [bootError, setBootError] = useState<string | null>(null);
     const [fetchError, setFetchError] = useState<string | null>(null);
     const [validationState, setValidationState] = useState<Record<string, number | null>>({});
     const [isSubmitting, setIsSubmitting] = useState<string | null>(null);
+    const [session, setSession] = useState<Session | null>(null);
     const hasFetchedRef = useRef(false);
 
-    // Fetch records WITHOUT toggling a global spinner — so silent refetches
-    // (Realtime fallbacks, token refresh, etc.) never blank the UI.
     const fetchRecords = useCallback(async (isInitial = false) => {
+        // Hard timeout so the fetch can never silently hang.
+        const timeoutMs = 8000;
         try {
-            const { data, error } = await supabase
-                .from('clinical_records')
-                .select('*')
-                .order('created_at', { ascending: false });
+            const result = await Promise.race([
+                supabase
+                    .from('clinical_records')
+                    .select('*')
+                    .order('created_at', { ascending: false }),
+                new Promise<{ __timeout: true }>((resolve) =>
+                    setTimeout(() => resolve({ __timeout: true }), timeoutMs)
+                ),
+            ]);
+
+            if ((result as { __timeout?: true }).__timeout) {
+                console.error('[nurse/dashboard] fetchRecords timed out after', timeoutMs, 'ms');
+                setFetchError(`La consulta tardó más de ${timeoutMs / 1000}s. Revisa la conexión o los logs de Supabase.`);
+                return;
+            }
+
+            const { data, error } = result as { data: ClinicalRecord[] | null; error: { message: string } | null };
 
             if (error) {
                 console.error('[nurse/dashboard] fetchRecords error:', error);
@@ -34,7 +67,7 @@ export default function NurseDashboard() {
             setFetchError(null);
             setRecords(data || []);
         } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : 'Error desconocido al cargar registros';
+            const message = err instanceof Error ? err.message : 'Error desconocido';
             console.error('[nurse/dashboard] fetchRecords exception:', err);
             setFetchError(message);
         } finally {
@@ -42,27 +75,53 @@ export default function NurseDashboard() {
         }
     }, []);
 
-    // Wait for AuthProvider to finish bootstrap before doing anything.
-    // Without this, the very first fetch races the session restore and
-    // either returns empty (RLS denies anon) or hangs forever — which is
-    // what was leaving the page stuck on "Cargando registros clínicos".
+    // Bootstrap: read the session ourselves, do NOT block on AuthProvider.
     useEffect(() => {
-        if (authLoading) return;
-        if (!session) {
-            setInitialLoading(false);
-            return;
-        }
         if (hasFetchedRef.current) return;
         hasFetchedRef.current = true;
-        fetchRecords(true);
-    }, [authLoading, session, fetchRecords]);
 
-    // Realtime subscription tied to the user session.
-    // Re-create the channel whenever the access token changes so the WS
-    // is always opened with a valid JWT (otherwise Realtime returns 401
-    // — the exact symptom seen in the Supabase realtime logs).
+        let cancelled = false;
+        (async () => {
+            try {
+                const result = await getSessionWithTimeout(6000);
+
+                if (cancelled) return;
+
+                if (result && (result as { __timeout?: true }).__timeout) {
+                    setBootError('No se pudo verificar la sesión (timeout). Recarga la página o vuelve a iniciar sesión.');
+                    setInitialLoading(false);
+                    return;
+                }
+
+                const sess = result as Session | null;
+                setSession(sess);
+
+                if (!sess) {
+                    // No session — middleware should have redirected. Stop the spinner
+                    // and show a clear message instead of hanging forever.
+                    setBootError('No hay sesión activa. Inicia sesión nuevamente.');
+                    setInitialLoading(false);
+                    return;
+                }
+
+                await fetchRecords(true);
+            } catch (err: unknown) {
+                if (cancelled) return;
+                const message = err instanceof Error ? err.message : 'Error inicializando el panel';
+                console.error('[nurse/dashboard] bootstrap exception:', err);
+                setBootError(message);
+                setInitialLoading(false);
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [fetchRecords]);
+
+    // Realtime subscription — only after we have a session.
     useEffect(() => {
-        if (authLoading || !session) return;
+        if (!session) return;
 
         try {
             supabase.realtime.setAuth(session.access_token);
@@ -96,7 +155,6 @@ export default function NurseDashboard() {
             .subscribe((status, err) => {
                 if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
                     console.warn('[nurse/dashboard] realtime status:', status, err);
-                    // Fallback: silent refetch so the UI doesn't go stale if WS breaks
                     fetchRecords(false);
                 }
             });
@@ -104,7 +162,15 @@ export default function NurseDashboard() {
         return () => {
             supabase.removeChannel(channel);
         };
-    }, [authLoading, session?.access_token, fetchRecords]);
+    }, [session, fetchRecords]);
+
+    // Listen for token refreshes so realtime + queries always have a fresh JWT.
+    useEffect(() => {
+        const { data: sub } = supabase.auth.onAuthStateChange((_event, newSession) => {
+            setSession(newSession);
+        });
+        return () => sub.subscription.unsubscribe();
+    }, []);
 
     const handleValidate = async (recordId: string) => {
         const level = validationState[recordId];
@@ -122,7 +188,7 @@ export default function NurseDashboard() {
 
         if (error) {
             console.error('Error validating record:', error);
-            alert('Error al validar el registro');
+            alert('Error al validar el registro: ' + error.message);
         }
         setIsSubmitting(null);
     };
@@ -138,19 +204,46 @@ export default function NurseDashboard() {
         return colors[level] || 'bg-slate-200 text-slate-600';
     };
 
-    // Full-screen spinner ONLY on the very first load. After that the
-    // table stays visible even while refetches happen in the background.
+    // ---------------- Render -------------------
+
+    // Fatal bootstrap error — show a real message, never an infinite spinner.
+    if (bootError) {
+        return (
+            <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
+                <div className="max-w-md w-full bg-white rounded-2xl border border-red-200 shadow-xl p-6 text-center">
+                    <div className="w-12 h-12 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto mb-4">
+                        <AlertTriangle className="w-6 h-6" />
+                    </div>
+                    <h2 className="text-lg font-bold text-slate-900 mb-2">No se pudo cargar el panel</h2>
+                    <p className="text-sm text-slate-600 mb-4">{bootError}</p>
+                    <div className="flex gap-2 justify-center">
+                        <button
+                            onClick={() => window.location.reload()}
+                            className="px-4 py-2 rounded-xl bg-medical-primary text-white text-sm font-bold hover:opacity-90"
+                        >
+                            Reintentar
+                        </button>
+                        <button
+                            onClick={async () => {
+                                await supabase.auth.signOut();
+                                window.location.assign('/login/nurse');
+                            }}
+                            className="px-4 py-2 rounded-xl border border-slate-200 text-slate-700 text-sm font-bold hover:bg-slate-50"
+                        >
+                            Cerrar sesión
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
     if (initialLoading) {
         return (
             <div className="min-h-screen bg-slate-50 flex items-center justify-center">
                 <div className="flex flex-col items-center gap-4">
                     <div className="w-12 h-12 border-4 border-medical-primary border-t-transparent rounded-full animate-spin" />
                     <p className="text-slate-500 font-medium">Cargando registros clínicos...</p>
-                    {fetchError && (
-                        <p className="text-xs text-red-500 max-w-md text-center px-4">
-                            {fetchError}
-                        </p>
-                    )}
                 </div>
             </div>
         );
@@ -173,11 +266,14 @@ export default function NurseDashboard() {
 
                     <div className="flex items-center gap-6">
                         <div className="hidden md:block text-right">
-                            <p className="text-sm font-bold text-slate-700">{profile?.full_name || 'Enfermero/a'}</p>
-                            <p className="text-xs text-slate-400 capitalize">{profile?.role || 'Personal de Salud'}</p>
+                            <p className="text-sm font-bold text-slate-700">{auth.profile?.full_name || session?.user?.email || 'Enfermero/a'}</p>
+                            <p className="text-xs text-slate-400 capitalize">{auth.profile?.role || 'Personal de Salud'}</p>
                         </div>
                         <button
-                            onClick={() => supabase.auth.signOut()}
+                            onClick={async () => {
+                                await supabase.auth.signOut();
+                                window.location.assign('/login/nurse');
+                            }}
                             className="p-2.5 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-red-500 transition-all"
                             title="Cerrar Sesión"
                         >
@@ -188,7 +284,6 @@ export default function NurseDashboard() {
             </header>
 
             <main className="max-w-7xl mx-auto p-6">
-                {/* Inline error banner — shown if a background refetch fails. */}
                 {fetchError && (
                     <div className="mb-4 flex items-start gap-3 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-2xl">
                         <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5" />
@@ -221,113 +316,124 @@ export default function NurseDashboard() {
                     </div>
                 </div>
 
-                {/* Table Container */}
-                <div className="bg-white rounded-3xl border border-slate-200 shadow-xl overflow-hidden">
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-left border-collapse">
-                            <thead>
-                                <tr className="bg-slate-50 border-b border-slate-200">
-                                    <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Paciente / Código</th>
-                                    <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Síntomas Declarados</th>
-                                    <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Clasificación IA</th>
-                                    <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Validación Enfermería</th>
-                                    <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Estado</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                                {records.map((record) => {
-                                    const aiResult = record.ai_response as unknown as TriageResult;
-                                    const isPending = !record.nurse_validated;
-                                    const hasMatch = record.nurse_override_level === record.esi_level;
-
-                                    return (
-                                        <tr key={record.id} className={`group hover:bg-slate-50 transition-colors ${isPending ? 'bg-blue-50/30' : ''}`}>
-                                            <td className="px-6 py-6">
-                                                <div className="flex flex-col gap-1">
-                                                    <span className="font-mono font-bold text-lg text-slate-900">
-                                                        {record.anonymous_code || '---'}
-                                                    </span>
-                                                    <span className="text-[10px] text-slate-400 font-medium">
-                                                        {new Date(record.created_at).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })}
-                                                    </span>
-                                                </div>
-                                            </td>
-                                            <td className="px-6 py-6 max-w-xs">
-                                                <p className="text-sm text-slate-600 line-clamp-2 leading-relaxed" title={record.symptoms_text}>
-                                                    {record.symptoms_text}
-                                                </p>
-                                            </td>
-                                            <td className="px-6 py-6">
-                                                {isPending ? (
-                                                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-100 border border-slate-200 w-fit">
-                                                        <EyeOff className="w-4 h-4 text-slate-400" />
-                                                        <span className="text-xs font-bold text-slate-400 italic">Cegado</span>
-                                                    </div>
-                                                ) : (
-                                                    <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg w-fit font-bold text-xs ${getESIColor(record.esi_level)}`}>
-                                                        <Activity className="w-4 h-4" />
-                                                        ESI {record.esi_level}
-                                                    </div>
-                                                )}
-                                            </td>
-                                            <td className="px-6 py-6">
-                                                {isPending ? (
-                                                    <div className="flex items-center gap-2">
-                                                        <select
-                                                            value={validationState[record.id] || ''}
-                                                            onChange={(e) => setValidationState(prev => ({ ...prev, [record.id]: Number(e.target.value) }))}
-                                                            className="text-sm font-bold bg-white border border-slate-200 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-medical-primary/20 focus:border-medical-primary transition-all"
-                                                        >
-                                                            <option value="">Seleccionar ESI...</option>
-                                                            {[1, 2, 3, 4, 5].map(v => <option key={v} value={v}>Nivel {v}</option>)}
-                                                        </select>
-                                                        <Button
-                                                            disabled={!validationState[record.id] || isSubmitting === record.id}
-                                                            onClick={() => handleValidate(record.id)}
-                                                            className="rounded-xl shadow-md px-4 py-2"
-                                                        >
-                                                            {isSubmitting === record.id ? <RefreshCw className="w-4 h-4 animate-spin" /> : 'Confirmar'}
-                                                        </Button>
-                                                    </div>
-                                                ) : (
-                                                    <div className="flex flex-col gap-1">
-                                                        <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg w-fit font-bold text-xs ${getESIColor(record.nurse_override_level as number)}`}>
-                                                            <CheckCircle className="w-4 h-4" />
-                                                            ESI {record.nurse_override_level}
-                                                        </div>
-                                                        <span className="text-[10px] text-slate-400 font-medium italic">Validado por Usted</span>
-                                                    </div>
-                                                )}
-                                            </td>
-                                            <td className="px-6 py-6 text-right">
-                                                {!isPending && (
-                                                    <div className="flex items-center gap-2 animate-in fade-in slide-in-from-right-2">
-                                                        {hasMatch ? (
-                                                            <div className="flex items-center gap-1.5 bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded-full border border-emerald-100 font-bold text-[10px] uppercase tracking-wider">
-                                                                <CheckCircle className="w-3.5 h-3.5" />
-                                                                Coincidencia
-                                                            </div>
-                                                        ) : (
-                                                            <div className="flex items-center gap-1.5 bg-amber-50 text-amber-700 px-3 py-1.5 rounded-full border border-amber-100 font-bold text-[10px] uppercase tracking-wider">
-                                                                <AlertTriangle className="w-3.5 h-3.5" />
-                                                                Discrepancia
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                )}
-                                                {isPending && (
-                                                    <div className="text-slate-300 group-hover:text-medical-primary transition-colors">
-                                                        <ChevronRight className="w-5 h-5 ml-auto" />
-                                                    </div>
-                                                )}
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
+                {/* Empty state */}
+                {records.length === 0 && !fetchError && (
+                    <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-12 text-center">
+                        <Eye className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                        <p className="text-slate-500 font-medium">Aún no hay registros clínicos para mostrar.</p>
+                        <p className="text-xs text-slate-400 mt-1">Cuando un paciente complete su triaje aparecerá aquí.</p>
                     </div>
-                </div>
+                )}
+
+                {/* Table Container */}
+                {records.length > 0 && (
+                    <div className="bg-white rounded-3xl border border-slate-200 shadow-xl overflow-hidden">
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-left border-collapse">
+                                <thead>
+                                    <tr className="bg-slate-50 border-b border-slate-200">
+                                        <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Paciente / Código</th>
+                                        <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Síntomas Declarados</th>
+                                        <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Clasificación IA</th>
+                                        <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Validación Enfermería</th>
+                                        <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Estado</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                    {records.map((record) => {
+                                        const aiResult = record.ai_response as unknown as TriageResult;
+                                        const isPending = !record.nurse_validated;
+                                        const hasMatch = record.nurse_override_level === record.esi_level;
+
+                                        return (
+                                            <tr key={record.id} className={`group hover:bg-slate-50 transition-colors ${isPending ? 'bg-blue-50/30' : ''}`}>
+                                                <td className="px-6 py-6">
+                                                    <div className="flex flex-col gap-1">
+                                                        <span className="font-mono font-bold text-lg text-slate-900">
+                                                            {record.anonymous_code || '---'}
+                                                        </span>
+                                                        <span className="text-[10px] text-slate-400 font-medium">
+                                                            {new Date(record.created_at).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })}
+                                                        </span>
+                                                    </div>
+                                                </td>
+                                                <td className="px-6 py-6 max-w-xs">
+                                                    <p className="text-sm text-slate-600 line-clamp-2 leading-relaxed" title={record.symptoms_text}>
+                                                        {record.symptoms_text}
+                                                    </p>
+                                                </td>
+                                                <td className="px-6 py-6">
+                                                    {isPending ? (
+                                                        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-100 border border-slate-200 w-fit">
+                                                            <EyeOff className="w-4 h-4 text-slate-400" />
+                                                            <span className="text-xs font-bold text-slate-400 italic">Cegado</span>
+                                                        </div>
+                                                    ) : (
+                                                        <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg w-fit font-bold text-xs ${getESIColor(record.esi_level)}`}>
+                                                            <Activity className="w-4 h-4" />
+                                                            ESI {record.esi_level}
+                                                        </div>
+                                                    )}
+                                                </td>
+                                                <td className="px-6 py-6">
+                                                    {isPending ? (
+                                                        <div className="flex items-center gap-2">
+                                                            <select
+                                                                value={validationState[record.id] || ''}
+                                                                onChange={(e) => setValidationState(prev => ({ ...prev, [record.id]: Number(e.target.value) }))}
+                                                                className="text-sm font-bold bg-white border border-slate-200 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-medical-primary/20 focus:border-medical-primary transition-all"
+                                                            >
+                                                                <option value="">Seleccionar ESI...</option>
+                                                                {[1, 2, 3, 4, 5].map(v => <option key={v} value={v}>Nivel {v}</option>)}
+                                                            </select>
+                                                            <Button
+                                                                disabled={!validationState[record.id] || isSubmitting === record.id}
+                                                                onClick={() => handleValidate(record.id)}
+                                                                className="rounded-xl shadow-md px-4 py-2"
+                                                            >
+                                                                {isSubmitting === record.id ? <RefreshCw className="w-4 h-4 animate-spin" /> : 'Confirmar'}
+                                                            </Button>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="flex flex-col gap-1">
+                                                            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg w-fit font-bold text-xs ${getESIColor(record.nurse_override_level as number)}`}>
+                                                                <CheckCircle className="w-4 h-4" />
+                                                                ESI {record.nurse_override_level}
+                                                            </div>
+                                                            <span className="text-[10px] text-slate-400 font-medium italic">Validado por Usted</span>
+                                                        </div>
+                                                    )}
+                                                </td>
+                                                <td className="px-6 py-6 text-right">
+                                                    {!isPending && (
+                                                        <div className="flex items-center gap-2 animate-in fade-in slide-in-from-right-2">
+                                                            {hasMatch ? (
+                                                                <div className="flex items-center gap-1.5 bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded-full border border-emerald-100 font-bold text-[10px] uppercase tracking-wider">
+                                                                    <CheckCircle className="w-3.5 h-3.5" />
+                                                                    Coincidencia
+                                                                </div>
+                                                            ) : (
+                                                                <div className="flex items-center gap-1.5 bg-amber-50 text-amber-700 px-3 py-1.5 rounded-full border border-amber-100 font-bold text-[10px] uppercase tracking-wider">
+                                                                    <AlertTriangle className="w-3.5 h-3.5" />
+                                                                    Discrepancia
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                    {isPending && (
+                                                        <div className="text-slate-300 group-hover:text-medical-primary transition-colors">
+                                                            <ChevronRight className="w-5 h-5 ml-auto" />
+                                                        </div>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                )}
             </main>
         </div>
     );
