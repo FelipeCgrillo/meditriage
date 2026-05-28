@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { Activity, Eye, EyeOff, CheckCircle, AlertTriangle, LogOut, RefreshCw, ChevronRight } from 'lucide-react';
@@ -9,29 +9,67 @@ import type { ClinicalRecord } from '@/lib/supabase/types';
 import type { TriageResult } from '@/lib/ai/schemas';
 
 export default function NurseDashboard() {
-    const { profile } = useAuth();
+    const { profile, session, loading: authLoading } = useAuth();
     const [records, setRecords] = useState<ClinicalRecord[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
+    const [initialLoading, setInitialLoading] = useState(true);
+    const [fetchError, setFetchError] = useState<string | null>(null);
     const [validationState, setValidationState] = useState<Record<string, number | null>>({});
     const [isSubmitting, setIsSubmitting] = useState<string | null>(null);
+    const hasFetchedRef = useRef(false);
 
-    const fetchRecords = useCallback(async () => {
-        setIsLoading(true);
-        const { data, error } = await supabase
-            .from('clinical_records')
-            .select('*')
-            .order('created_at', { ascending: false });
+    // Fetch records WITHOUT toggling a global spinner — so silent refetches
+    // (Realtime fallbacks, token refresh, etc.) never blank the UI.
+    const fetchRecords = useCallback(async (isInitial = false) => {
+        try {
+            const { data, error } = await supabase
+                .from('clinical_records')
+                .select('*')
+                .order('created_at', { ascending: false });
 
-        if (!error && data) {
-            setRecords(data);
+            if (error) {
+                console.error('[nurse/dashboard] fetchRecords error:', error);
+                setFetchError(error.message);
+                return;
+            }
+            setFetchError(null);
+            setRecords(data || []);
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : 'Error desconocido al cargar registros';
+            console.error('[nurse/dashboard] fetchRecords exception:', err);
+            setFetchError(message);
+        } finally {
+            if (isInitial) setInitialLoading(false);
         }
-        setIsLoading(false);
     }, []);
 
+    // Wait for AuthProvider to finish bootstrap before doing anything.
+    // Without this, the very first fetch races the session restore and
+    // either returns empty (RLS denies anon) or hangs forever — which is
+    // what was leaving the page stuck on "Cargando registros clínicos".
     useEffect(() => {
-        fetchRecords();
+        if (authLoading) return;
+        if (!session) {
+            setInitialLoading(false);
+            return;
+        }
+        if (hasFetchedRef.current) return;
+        hasFetchedRef.current = true;
+        fetchRecords(true);
+    }, [authLoading, session, fetchRecords]);
 
-        // Realtime subscription
+    // Realtime subscription tied to the user session.
+    // Re-create the channel whenever the access token changes so the WS
+    // is always opened with a valid JWT (otherwise Realtime returns 401
+    // — the exact symptom seen in the Supabase realtime logs).
+    useEffect(() => {
+        if (authLoading || !session) return;
+
+        try {
+            supabase.realtime.setAuth(session.access_token);
+        } catch (e) {
+            console.warn('[nurse/dashboard] realtime.setAuth failed', e);
+        }
+
         const channel = supabase
             .channel('clinical_records_changes')
             .on(
@@ -42,19 +80,31 @@ export default function NurseDashboard() {
                         setRecords((prev) => [payload.new as ClinicalRecord, ...prev]);
                     } else if (payload.eventType === 'UPDATE') {
                         setRecords((prev) =>
-                            prev.map((r) => (r.id === payload.new.id ? (payload.new as ClinicalRecord) : r))
+                            prev.map((r) =>
+                                r.id === (payload.new as ClinicalRecord).id
+                                    ? (payload.new as ClinicalRecord)
+                                    : r
+                            )
                         );
                     } else if (payload.eventType === 'DELETE') {
-                        setRecords((prev) => prev.filter((r) => r.id !== payload.old.id));
+                        setRecords((prev) =>
+                            prev.filter((r) => r.id !== (payload.old as { id: string }).id)
+                        );
                     }
                 }
             )
-            .subscribe();
+            .subscribe((status, err) => {
+                if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+                    console.warn('[nurse/dashboard] realtime status:', status, err);
+                    // Fallback: silent refetch so the UI doesn't go stale if WS breaks
+                    fetchRecords(false);
+                }
+            });
 
         return () => {
             supabase.removeChannel(channel);
         };
-    }, [fetchRecords]);
+    }, [authLoading, session?.access_token, fetchRecords]);
 
     const handleValidate = async (recordId: string) => {
         const level = validationState[recordId];
@@ -88,12 +138,19 @@ export default function NurseDashboard() {
         return colors[level] || 'bg-slate-200 text-slate-600';
     };
 
-    if (isLoading && records.length === 0) {
+    // Full-screen spinner ONLY on the very first load. After that the
+    // table stays visible even while refetches happen in the background.
+    if (initialLoading) {
         return (
             <div className="min-h-screen bg-slate-50 flex items-center justify-center">
                 <div className="flex flex-col items-center gap-4">
                     <div className="w-12 h-12 border-4 border-medical-primary border-t-transparent rounded-full animate-spin" />
                     <p className="text-slate-500 font-medium">Cargando registros clínicos...</p>
+                    {fetchError && (
+                        <p className="text-xs text-red-500 max-w-md text-center px-4">
+                            {fetchError}
+                        </p>
+                    )}
                 </div>
             </div>
         );
@@ -131,6 +188,23 @@ export default function NurseDashboard() {
             </header>
 
             <main className="max-w-7xl mx-auto p-6">
+                {/* Inline error banner — shown if a background refetch fails. */}
+                {fetchError && (
+                    <div className="mb-4 flex items-start gap-3 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-2xl">
+                        <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                        <div className="flex-1">
+                            <p className="text-sm font-bold">No se pudieron actualizar los registros</p>
+                            <p className="text-xs opacity-80">{fetchError}</p>
+                        </div>
+                        <button
+                            onClick={() => fetchRecords(false)}
+                            className="text-xs font-bold underline hover:no-underline"
+                        >
+                            Reintentar
+                        </button>
+                    </div>
+                )}
+
                 {/* Stats Summary */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
                     <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
