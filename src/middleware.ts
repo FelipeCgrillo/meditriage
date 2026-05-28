@@ -78,7 +78,7 @@ export async function middleware(request: NextRequest) {
             .from('user_profiles')
             .select('role')
             .eq('id', user.id)
-            .single();
+            .maybeSingle();
 
         const allowedRoles = protectedRoutes[matchedRoute];
 
@@ -99,7 +99,7 @@ export async function middleware(request: NextRequest) {
             .from('user_profiles')
             .select('role')
             .eq('id', user.id)
-            .single();
+            .maybeSingle();
 
         if (profile) {
             // 1) Honor an explicit ?redirect= if it points at a safe internal path.
