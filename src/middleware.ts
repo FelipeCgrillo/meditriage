@@ -37,6 +37,14 @@ export async function middleware(request: NextRequest) {
 
     const pathname = request.nextUrl.pathname;
 
+    // Friendly alias: /nurse -> /nurse/dashboard (there is no page at /nurse).
+    if (pathname === '/nurse') {
+        const url = request.nextUrl.clone();
+        url.pathname = '/nurse/dashboard';
+        url.search = '';
+        return NextResponse.redirect(url);
+    }
+
     // Define protected routes and their required roles.
     // Order matters: more specific paths must be checked before their parents
     // (so `/nurse/dashboard` matches before `/nurse`). We sort by length desc.
