@@ -29,43 +29,57 @@ export const TriageResultSchema = z.object({
 export type TriageResult = z.infer<typeof TriageResultSchema>;
 
 /**
- * Flexible schema for AI responses with optional fields
- * AI SDK has issues with discriminated unions, so we use optional fields
- * and validate the response type in the API route
+ * Schema flexible para respuestas del agente de triage.
+ *
+ * IMPORTANTE: el valor de `status` debe coincidir EXACTAMENTE con el que
+ * pide el system prompt (ver src/lib/ai/prompts.ts). Históricamente este
+ * schema usaba 'completed' mientras que el prompt y todo el runtime
+ * (ChatInterface, TriageChatLegacy) usan 'success'. Eso producía dos
+ * fuentes de verdad y dejaba el schema inservible para validar.
+ * Aquí lo alineamos a 'success' | 'needs_info'.
  */
 export const TriageResponseSchema = z.object({
-    // Status field - determines response type
+    // Status field - determina el tipo de respuesta.
     status: z
-        .enum(['completed', 'needs_info'])
-        .describe("Response status: 'completed' if AI can classify, 'needs_info' if more information is needed"),
+        .enum(['success', 'needs_info'])
+        .describe("Response status: 'success' if AI can classify, 'needs_info' if more information is needed"),
 
-    // Fields for 'completed' status (optional - present when status='completed')
+    // Campos cuando status='success' (todos opcionales en el schema porque
+    // su presencia depende del status; el API route puede validar la
+    // combinación correcta).
     esi_level: z
         .number()
         .int()
         .min(1)
         .max(5)
+        .nullable()
         .optional()
-        .describe('Emergency Severity Index Level (1=Critical, 5=Non-Urgent). Required when status=completed'),
-
-    critical_signs: z
-        .array(z.string())
-        .optional()
-        .describe('Array of identified critical signs or symptoms. Required when status=completed'),
+        .describe('Emergency Severity Index Level (1=Critical, 5=Non-Urgent). Required when status=success'),
 
     reasoning: z
         .string()
         .optional()
-        .describe('Detailed clinical reasoning using medical terminology in Spanish. Required when status=completed'),
+        .describe('Detailed clinical reasoning using medical terminology in Spanish. Required when status=success'),
+
+    suggested_action: z
+        .string()
+        .optional()
+        .describe('Clear and direct instruction for the patient (e.g., where to go, what to do while waiting). Required when status=success'),
+
+    critical_signs: z
+        .array(z.string())
+        .optional()
+        .describe('Optional array of identified critical signs or symptoms (legacy field, kept for backwards compatibility)'),
 
     suggested_specialty: z
         .string()
         .optional()
-        .describe('Recommended medical specialty. Required when status=completed'),
+        .describe('Optional recommended medical specialty (legacy field, kept for backwards compatibility)'),
 
-    // Fields for 'needs_info' status (optional - present when status='needs_info')
+    // Campos cuando status='needs_info'.
     follow_up_question: z
         .string()
+        .nullable()
         .optional()
         .describe("Clinical question to clarify ambiguity. Required when status=needs_info. Example: '¿Desde hace cuánto?' or '¿Tiene ideas suicidas?'"),
 
