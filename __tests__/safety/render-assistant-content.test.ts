@@ -60,22 +60,32 @@ const cases: TestCase[] = [
         },
     },
     {
-        name: 'renders suggested_action for success payload with esi level',
+        name: 'hides bubble for terminal success payload (no clinical leak to patient)',
         run: () => {
+            // El paciente NUNCA debe ver la recomendación clínica final
+            // ni el nivel ESI. Cuando el payload es terminal, el globo se
+            // suprime por completo y la pantalla "Evaluación Finalizada"
+            // toma el control de la UX.
             const raw = JSON.stringify({
                 status: 'success',
                 esi_level: 3,
                 suggested_action: 'Acuda al CESFAM en las próximas horas.',
             });
             const r = renderAssistantContent(raw, false, true);
-            assert(r.hideBubble === false, 'should show bubble');
-            assert(r.content.includes('CESFAM'), 'content should be suggested_action');
-            assert(r.esiLevel === 3, 'esiLevel should be propagated');
+            assert(r.hideBubble === true, 'terminal payload must hide bubble');
+            assert(r.content === '', `content must be empty, got "${r.content}"`);
+            assert(
+                r.esiLevel === 3,
+                'esiLevel still propagated (consumed by post-finalize hook)',
+            );
         },
     },
     {
         name: 'renders fallback error message instead of raw content',
         run: () => {
+            // status='success' pero error=true y esi_level=null -> NO es
+            // terminal, debe mostrar el suggested_action de fallback para
+            // que el paciente sepa que hubo un problema.
             const raw = JSON.stringify({
                 status: 'success',
                 esi_level: null,

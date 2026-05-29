@@ -89,17 +89,30 @@ export function renderAssistantContent(
     const payload = extractJSON<TriageResponsePayload>(raw);
 
     if (payload) {
+        const terminal = isTerminalTriageResult(payload);
+
+        // El paciente NO debe ver la recomendación clínica final ni la
+        // badge con el nivel ESI. Cuando el payload es terminal
+        // ocultamos el globo completo — la pantalla de "Evaluación
+        // Finalizada" con el código de seguimiento ya comunica al
+        // paciente que su caso fue procesado.
+        if (terminal) {
+            return {
+                hideBubble: true,
+                content: '',
+                esiLevel: payload.esi_level ?? null,
+            };
+        }
+
         const visibleText =
             payload.status === 'needs_info'
                 ? payload.follow_up_question || payload.suggested_action || ''
                 : payload.suggested_action || payload.message || '';
-        const terminal = isTerminalTriageResult(payload);
-        const options =
-            !terminal && Array.isArray(payload.response_options)
-                ? payload.response_options.filter(
-                      (o) => typeof o === 'string' && o.trim().length > 0,
-                  )
-                : undefined;
+        const options = Array.isArray(payload.response_options)
+            ? payload.response_options.filter(
+                  (o) => typeof o === 'string' && o.trim().length > 0,
+              )
+            : undefined;
         return {
             hideBubble: false,
             content: visibleText || '',
