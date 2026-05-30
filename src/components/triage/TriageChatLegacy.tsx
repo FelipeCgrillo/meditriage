@@ -23,7 +23,15 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat } from 'ai/react';
-import { Bot, Send, Loader2, AlertTriangle, RefreshCw } from 'lucide-react';
+import {
+    Bot,
+    Send,
+    Loader2,
+    AlertTriangle,
+    RefreshCw,
+    Mic,
+    MicOff,
+} from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase/client';
 import { generateAnonymousCode } from '@/lib/utils/anonymousCode';
 import { extractJSON } from '@/lib/utils/validation';
@@ -35,6 +43,7 @@ import {
     buildClinicalRecordPayload,
     type ClinicalRecordPayload,
 } from '@/lib/utils/clinicalRecord';
+import { useSpeechRecognition } from '@/lib/hooks/useSpeechRecognition';
 
 interface TriageResponse {
     status?: 'success' | 'needs_info' | 'error' | string;
@@ -167,6 +176,7 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
     const {
         messages,
         input,
+        setInput,
         handleInputChange,
         handleSubmit,
         isLoading,
@@ -434,6 +444,54 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
     const inputDisabled =
         isLoading || isFinished || declined || consentStep !== 'completed';
 
+    // Dictado por voz (Web Speech API nativa del navegador).
+    // Funciona en Chrome (desktop + Android), Edge, Safari iOS 14.5+,
+    // Samsung Internet, Opera. No funciona en Firefox.
+    const {
+        isSupported: speechSupported,
+        isListening,
+        finalTranscript: speechFinalTranscript,
+        interimTranscript: speechInterimTranscript,
+        error: speechError,
+        start: startSpeech,
+        stop: stopSpeech,
+        reset: resetSpeech,
+    } = useSpeechRecognition({ lang: 'es-CL', continuous: true });
+
+    // Mientras el usuario dicta, vamos volcando el texto al input.
+    // Concatenamos lo que ya había con final + interim (parcial),
+    // separando con espacio si corresponde.
+    const lastDictatedRef = useRef<string>('');
+    useEffect(() => {
+        if (!isListening) return;
+        const dictated = [speechFinalTranscript, speechInterimTranscript]
+            .filter((s) => s && s.length > 0)
+            .join(' ')
+            .trim();
+        if (dictated === lastDictatedRef.current) return;
+        lastDictatedRef.current = dictated;
+        setInput(dictated);
+    }, [isListening, speechFinalTranscript, speechInterimTranscript, setInput]);
+
+    const handleToggleDictation = useCallback(() => {
+        if (isListening) {
+            stopSpeech();
+            return;
+        }
+        lastDictatedRef.current = '';
+        resetSpeech();
+        setInput('');
+        startSpeech();
+    }, [isListening, startSpeech, stopSpeech, resetSpeech, setInput]);
+
+    // Cierra el dictado automáticamente cuando el input se deshabilita
+    // (p.ej. cuando llega una opción rápida y bloqueamos el texto libre).
+    useEffect(() => {
+        if (inputDisabled && isListening) {
+            stopSpeech();
+        }
+    }, [inputDisabled, isListening, stopSpeech]);
+
     return (
         <div className="flex flex-col h-screen md:h-[calc(100vh-4rem)] w-full md:max-w-5xl md:mx-auto bg-gradient-to-b from-indigo-50/80 via-white to-white md:shadow-2xl md:rounded-t-2xl overflow-hidden">
             {/* Header — old design preserved */}
@@ -570,11 +628,31 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
 
             {/* Input footer — old floating pill design */}
             <div className="bg-transparent p-3 md:p-5 flex-shrink-0">
+                {/* Banner de error o aviso del dictado por voz */}
+                {speechError && (
+                    <div
+                        role="alert"
+                        className="max-w-4xl mx-auto mb-2 bg-amber-50 border border-amber-200 text-amber-900 rounded-2xl px-4 py-2 text-xs md:text-sm flex items-center gap-2"
+                    >
+                        <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                        <span>{speechError}</span>
+                    </div>
+                )}
+                {isListening && !speechError && (
+                    <div className="max-w-4xl mx-auto mb-2 text-center text-xs md:text-sm text-rose-600 font-medium flex items-center justify-center gap-2">
+                        <span className="relative flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
+                        </span>
+                        Escuchando… toca el micrófono para detener
+                    </div>
+                )}
                 <form
                     onSubmit={(e) => {
                         e.preventDefault();
                         if (inputDisabled) return;
                         if (input.trim().length < MIN_INPUT_LENGTH) return;
+                        if (isListening) stopSpeech();
                         handleSubmit(e);
                     }}
                     className="flex items-end gap-2 md:gap-3 max-w-4xl mx-auto bg-white rounded-full shadow-xl shadow-indigo-100/50 px-2 md:px-3 py-2 border border-indigo-50"
@@ -585,7 +663,9 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
                             onChange={handleInputChange}
                             placeholder={
                                 consentStep === 'completed'
-                                    ? 'Describe tus síntomas aquí...'
+                                    ? isListening
+                                        ? 'Escuchando…'
+                                        : 'Describe tus síntomas aquí o usa el micrófono…'
                                     : 'Selecciona una opción arriba...'
                             }
                             className="w-full rounded-full border-0 bg-gray-50 px-4 md:px-5 py-2.5 md:py-3 text-sm md:text-base focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 disabled:bg-gray-100 disabled:text-gray-400"
@@ -598,6 +678,34 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
                             </span>
                         )}
                     </div>
+
+                    {/* Botón de micrófono — solo se renderiza si el navegador
+                        soporta Web Speech API (Chrome, Edge, Safari iOS 14.5+,
+                        Samsung Internet, Opera). En Firefox queda oculto. */}
+                    {speechSupported && (
+                        <button
+                            type="button"
+                            onClick={handleToggleDictation}
+                            disabled={inputDisabled && !isListening}
+                            aria-label={
+                                isListening
+                                    ? 'Detener dictado por voz'
+                                    : 'Iniciar dictado por voz'
+                            }
+                            aria-pressed={isListening}
+                            className={`flex items-center justify-center flex-shrink-0 rounded-full h-10 w-10 md:h-11 md:w-11 transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+                                isListening
+                                    ? 'bg-rose-500 hover:bg-rose-600 text-white animate-pulse shadow-md shadow-rose-200'
+                                    : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+                            }`}
+                        >
+                            {isListening ? (
+                                <MicOff className="h-5 w-5" />
+                            ) : (
+                                <Mic className="h-5 w-5" />
+                            )}
+                        </button>
+                    )}
 
                     <button
                         type="submit"
