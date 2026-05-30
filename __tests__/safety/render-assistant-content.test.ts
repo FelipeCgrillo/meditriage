@@ -60,7 +60,7 @@ const cases: TestCase[] = [
         },
     },
     {
-        name: 'renders suggested_action for success payload with esi level',
+        name: 'hides bubble for terminal success payload (patient must not see recommendation)',
         run: () => {
             const raw = JSON.stringify({
                 status: 'success',
@@ -68,9 +68,8 @@ const cases: TestCase[] = [
                 suggested_action: 'Acuda al CESFAM en las próximas horas.',
             });
             const r = renderAssistantContent(raw, false, true);
-            assert(r.hideBubble === false, 'should show bubble');
-            assert(r.content.includes('CESFAM'), 'content should be suggested_action');
-            assert(r.esiLevel === 3, 'esiLevel should be propagated');
+            assert(r.hideBubble === true, 'terminal bubble must be hidden from the patient');
+            assert(r.esiLevel === 3, 'esiLevel should still be propagated so the chat can finalize');
         },
     },
     {
