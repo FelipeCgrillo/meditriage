@@ -37,8 +37,15 @@ function hasActionableFollowUp(payload: TriageResponsePayload): boolean {
  * The model is *supposed* to emit `status: 'success'` for terminal
  * turns, but in practice it sometimes drops the status field, sends a
  * variant ('complete', 'done', etc.) or wraps the JSON in prose. We
- * treat any payload with a valid ESI level (1..5) and no actionable
- * follow-up as terminal — that's what the patient sees on screen.
+ * treat any payload with a valid ESI level (1..5) as terminal as long
+ * as it's not explicitly an error or a needs_info turn.
+ *
+ * Importantly, we DO NOT block finalization just because the payload
+ * has residual `follow_up_question` or `response_options` fields — the
+ * model occasionally emits both a `suggested_action` (terminal
+ * recommendation) AND a follow-up template. If `status === 'success'`
+ * the suggested_action wins; if there's no explicit status we still
+ * trust a valid ESI level + a non-empty `suggested_action`.
  *
  * Errors and `needs_info` turns are explicitly excluded.
  */
@@ -58,6 +65,12 @@ export function isTerminalTriageResult(
     ) {
         return false;
     }
+    // Explicit success: terminal regardless of leftover follow-up fields.
+    if (payload.status === 'success') return true;
+    // No explicit status: trust ESI + suggested_action as terminal.
+    const action = payload.suggested_action;
+    if (typeof action === 'string' && action.trim().length > 0) return true;
+    // Otherwise, fall back to the conservative rule.
     if (hasActionableFollowUp(payload)) return false;
     return true;
 }

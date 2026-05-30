@@ -132,9 +132,30 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
                 );
                 return;
             }
-            const { error: dbError } = await supabase
+            // Defensive 12s timeout: Safari iOS occasionally lets fetch
+            // promises hang indefinitely when the network/connection is
+            // unstable. Without this the patient just sees the final
+            // bubble forever — no error banner, no finalize screen.
+            const insertPromise = supabase
                 .from('clinical_records')
                 .insert(payload as never);
+            const timeoutPromise = new Promise<{ error: { message: string } }>(
+                (resolve) =>
+                    setTimeout(
+                        () =>
+                            resolve({
+                                error: {
+                                    message:
+                                        'tiempo de espera agotado guardando la evaluación',
+                                },
+                            }),
+                        12_000,
+                    ),
+            );
+            const { error: dbError } = (await Promise.race([
+                insertPromise,
+                timeoutPromise,
+            ])) as { error: { message: string } | null };
             if (dbError) {
                 console.error('Error saving record:', dbError);
                 throw new Error(dbError.message || 'insert failed');
@@ -202,6 +223,21 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
                 // para que un fallo futuro vuelva a tener su único reintento.
                 autoRetryRef.current = false;
                 setStreamError(null);
+                // Telemetría defensiva: deja registro del JSON parseado para
+                // que cuando algo se quede pegado se pueda inspeccionar en
+                // remote console / Vercel logs (no incluye PII del paciente
+                // más allá de los campos clínicos que el modelo ya conoce).
+                if (typeof window !== 'undefined') {
+                    console.info('[triage] onFinish parsed payload:', {
+                        status: json.status,
+                        esi_level: json.esi_level,
+                        has_follow_up: Boolean(json.follow_up_question),
+                        has_options: Array.isArray(json.response_options)
+                            ? json.response_options.length
+                            : 0,
+                        is_terminal: isTerminalTriageResult(json),
+                    });
+                }
                 // Finalize on any payload that names a valid ESI level
                 // and no longer asks the patient anything — regardless
                 // of whether `status` is exactly 'success'. The model

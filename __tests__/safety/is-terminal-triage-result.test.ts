@@ -174,6 +174,40 @@ const cases: TestCase[] = [
         },
     },
     {
+        name: 'BUG iPhone: status=success + ESI + suggested_action + residual options IS terminal',
+        run: () => {
+            // Reproduce the reported iPhone bug: model emitted a terminal
+            // recommendation (ESI 3 + suggested_action) but also left a
+            // residual response_options template from a previous turn.
+            // Old code rejected this as non-terminal → chat stuck.
+            const p: TriageResponsePayload = {
+                status: 'success',
+                esi_level: 3,
+                suggested_action: 'Dirígete al área de urgencias para evaluación médica.',
+                response_options: ['Sí', 'No'],
+            };
+            assert(
+                isTerminalTriageResult(p) === true,
+                'explicit success + ESI must finalize even with leftover options',
+            );
+        },
+    },
+    {
+        name: 'BUG iPhone: success + ESI + follow_up_question string still finalizes',
+        run: () => {
+            const p: TriageResponsePayload = {
+                status: 'success',
+                esi_level: 2,
+                suggested_action: 'Acuda inmediatamente.',
+                follow_up_question: 'Texto residual',
+            };
+            assert(
+                isTerminalTriageResult(p) === true,
+                'explicit success ignores residual follow-up',
+            );
+        },
+    },
+    {
         name: 'options with only whitespace are not actionable',
         run: () => {
             const p: TriageResponsePayload = {
