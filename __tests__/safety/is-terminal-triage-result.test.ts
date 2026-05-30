@@ -220,7 +220,7 @@ const cases: TestCase[] = [
         },
     },
     {
-        name: 'renderAssistantContent on terminal payload (no options) renders cleanly',
+        name: 'renderAssistantContent on terminal payload hides the bubble (patient must not see recommendation)',
         run: () => {
             const raw = JSON.stringify({
                 status: 'success',
@@ -228,9 +228,25 @@ const cases: TestCase[] = [
                 suggested_action: 'ACUDE A URGENCIAS DE INMEDIATO',
             });
             const r = renderAssistantContent(raw, false, true);
-            assert(r.hideBubble === false, 'terminal bubble must be visible');
-            assert(r.esiLevel === 2, 'ESI should surface for the badge');
-            assert(!r.options || r.options.length === 0, 'no options expected');
+            assert(r.hideBubble === true, 'terminal bubble must be hidden from the patient');
+            assert(r.esiLevel === 2, 'ESI should still surface so the chat can finalize');
+        },
+    },
+    {
+        name: 'renderAssistantContent on terminal payload with residual options also hides the bubble',
+        run: () => {
+            // BUG iPhone payload: success + ESI + residual response_options.
+            // Bubble must be hidden so the patient does not see the
+            // clinical recommendation; finalization still triggers via
+            // isTerminalTriageResult in the chat onFinish hook.
+            const raw = JSON.stringify({
+                status: 'success',
+                esi_level: 3,
+                suggested_action: 'Dirígete a urgencias.',
+                response_options: ['Sí', 'No'],
+            });
+            const r = renderAssistantContent(raw, false, true);
+            assert(r.hideBubble === true, 'terminal bubble must be hidden even with residual options');
         },
     },
 ];

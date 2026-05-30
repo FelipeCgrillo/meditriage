@@ -102,17 +102,27 @@ export function renderAssistantContent(
     const payload = extractJSON<TriageResponsePayload>(raw);
 
     if (payload) {
+        const terminal = isTerminalTriageResult(payload);
+        // Los payloads terminales contienen la recomendación clínica y
+        // el nivel ESI — información destinada al personal médico, no al
+        // paciente. Ocultamos el globo para que el paciente sólo vea la
+        // pantalla "Evaluación Finalizada" con su código anónimo.
+        if (terminal) {
+            return {
+                hideBubble: true,
+                content: '',
+                esiLevel: payload.esi_level ?? null,
+            };
+        }
         const visibleText =
             payload.status === 'needs_info'
                 ? payload.follow_up_question || payload.suggested_action || ''
                 : payload.suggested_action || payload.message || '';
-        const terminal = isTerminalTriageResult(payload);
-        const options =
-            !terminal && Array.isArray(payload.response_options)
-                ? payload.response_options.filter(
-                      (o) => typeof o === 'string' && o.trim().length > 0,
-                  )
-                : undefined;
+        const options = Array.isArray(payload.response_options)
+            ? payload.response_options.filter(
+                  (o) => typeof o === 'string' && o.trim().length > 0,
+              )
+            : undefined;
         return {
             hideBubble: false,
             content: visibleText || '',
