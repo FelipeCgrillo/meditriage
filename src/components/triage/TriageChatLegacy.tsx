@@ -338,6 +338,68 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
         }));
     }, [messages]);
 
+    // ----------------------------------------------------------------
+    // Hooks de dictado por voz (Web Speech API nativa del navegador).
+    // Funciona en Chrome (desktop + Android), Edge, Safari iOS 14.5+,
+    // Samsung Internet, Opera. No funciona en Firefox.
+    //
+    // IMPORTANTE: estos hooks DEBEN declararse aquí — antes del early
+    // return de `isFinished` más abajo — para no violar las reglas de
+    // React (los hooks siempre se llaman en el mismo orden en cada
+    // render). Si se declaran después del return condicional, ESLint
+    // (react-hooks/rules-of-hooks) hace fallar el build.
+    // ----------------------------------------------------------------
+    const {
+        isSupported: speechSupported,
+        isListening,
+        finalTranscript: speechFinalTranscript,
+        interimTranscript: speechInterimTranscript,
+        error: speechError,
+        start: startSpeech,
+        stop: stopSpeech,
+        reset: resetSpeech,
+    } = useSpeechRecognition({ lang: 'es-CL', continuous: true });
+
+    // Mientras el usuario dicta, vamos volcando el texto al input.
+    // Concatenamos final + interim (parcial), separando con espacio.
+    const lastDictatedRef = useRef<string>('');
+    useEffect(() => {
+        if (!isListening) return;
+        const dictated = [speechFinalTranscript, speechInterimTranscript]
+            .filter((s) => s && s.length > 0)
+            .join(' ')
+            .trim();
+        if (dictated === lastDictatedRef.current) return;
+        lastDictatedRef.current = dictated;
+        setInput(dictated);
+    }, [isListening, speechFinalTranscript, speechInterimTranscript, setInput]);
+
+    const handleToggleDictation = useCallback(() => {
+        if (isListening) {
+            stopSpeech();
+            return;
+        }
+        lastDictatedRef.current = '';
+        resetSpeech();
+        setInput('');
+        startSpeech();
+    }, [isListening, startSpeech, stopSpeech, resetSpeech, setInput]);
+
+    // `inputDisabled` se usa más abajo en el JSX, pero también
+    // necesitamos referenciarlo en el useEffect que sigue (cerrar
+    // dictado al deshabilitar el input). Lo computamos aquí, antes
+    // de cualquier early return, para mantener el orden de hooks.
+    const inputDisabled =
+        isLoading || isFinished || declined || consentStep !== 'completed';
+
+    // Cierra el dictado automáticamente cuando el input se deshabilita
+    // (p.ej. cuando llega una opción rápida y bloqueamos el texto libre).
+    useEffect(() => {
+        if (inputDisabled && isListening) {
+            stopSpeech();
+        }
+    }, [inputDisabled, isListening, stopSpeech]);
+
     const pushPre = (msg: Omit<PreMessage, 'id'>) => {
         setPreMessages((prev) => [
             ...prev,
@@ -440,57 +502,6 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
             />
         );
     }
-
-    const inputDisabled =
-        isLoading || isFinished || declined || consentStep !== 'completed';
-
-    // Dictado por voz (Web Speech API nativa del navegador).
-    // Funciona en Chrome (desktop + Android), Edge, Safari iOS 14.5+,
-    // Samsung Internet, Opera. No funciona en Firefox.
-    const {
-        isSupported: speechSupported,
-        isListening,
-        finalTranscript: speechFinalTranscript,
-        interimTranscript: speechInterimTranscript,
-        error: speechError,
-        start: startSpeech,
-        stop: stopSpeech,
-        reset: resetSpeech,
-    } = useSpeechRecognition({ lang: 'es-CL', continuous: true });
-
-    // Mientras el usuario dicta, vamos volcando el texto al input.
-    // Concatenamos lo que ya había con final + interim (parcial),
-    // separando con espacio si corresponde.
-    const lastDictatedRef = useRef<string>('');
-    useEffect(() => {
-        if (!isListening) return;
-        const dictated = [speechFinalTranscript, speechInterimTranscript]
-            .filter((s) => s && s.length > 0)
-            .join(' ')
-            .trim();
-        if (dictated === lastDictatedRef.current) return;
-        lastDictatedRef.current = dictated;
-        setInput(dictated);
-    }, [isListening, speechFinalTranscript, speechInterimTranscript, setInput]);
-
-    const handleToggleDictation = useCallback(() => {
-        if (isListening) {
-            stopSpeech();
-            return;
-        }
-        lastDictatedRef.current = '';
-        resetSpeech();
-        setInput('');
-        startSpeech();
-    }, [isListening, startSpeech, stopSpeech, resetSpeech, setInput]);
-
-    // Cierra el dictado automáticamente cuando el input se deshabilita
-    // (p.ej. cuando llega una opción rápida y bloqueamos el texto libre).
-    useEffect(() => {
-        if (inputDisabled && isListening) {
-            stopSpeech();
-        }
-    }, [inputDisabled, isListening, stopSpeech]);
 
     return (
         <div className="flex flex-col h-screen md:h-[calc(100vh-4rem)] w-full md:max-w-5xl md:mx-auto bg-gradient-to-b from-indigo-50/80 via-white to-white md:shadow-2xl md:rounded-t-2xl overflow-hidden">
