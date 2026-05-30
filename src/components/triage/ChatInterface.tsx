@@ -252,7 +252,6 @@ export default function ChatInterface() {
                     let content = m.content;
                     let triageData: TriageResponse | null = null;
                     let responseOptions: string[] | undefined;
-                    let isTerminalResult = false;
 
                     if (!isUser) {
                         const parsed = extractJSON<TriageResponse>(m.content);
@@ -267,38 +266,8 @@ export default function ChatInterface() {
                                     (o) => typeof o === 'string' && o.trim().length > 0,
                                 )
                                 : undefined;
-
-                            // El paciente NO debe ver la recomendación clínica
-                            // final ni la badge con el nivel ESI. Cuando el
-                            // payload es terminal (success + ESI válido + sin
-                            // follow-up), suprimimos el globo entero. La
-                            // alerta de emergencia (showEmergencyAlert) y la
-                            // pantalla de finalización ya comunican al paciente
-                            // que su caso fue procesado.
-                            const lvl = triageData.esi_level;
-                            const hasFollowUp =
-                                (typeof triageData.follow_up_question === 'string' &&
-                                    triageData.follow_up_question.trim().length > 0) ||
-                                (Array.isArray(triageData.response_options) &&
-                                    triageData.response_options.some(
-                                        (o) => typeof o === 'string' && o.trim().length > 0,
-                                    ));
-                            isTerminalResult =
-                                triageData.status !== 'needs_info' &&
-                                typeof lvl === 'number' &&
-                                Number.isInteger(lvl) &&
-                                lvl >= 1 &&
-                                lvl <= 5 &&
-                                !hasFollowUp;
                         }
                         // Otherwise: still streaming or not JSON — render raw content.
-                    }
-
-                    // Suprimir mensaje terminal del asistente (recomendación
-                    // y badge ESI). El paciente sólo debería ver la pantalla
-                    // de evaluación finalizada con su código de seguimiento.
-                    if (!isUser && isTerminalResult) {
-                        return null;
                     }
 
                     const selectedOption = answeredOptions[m.id];
