@@ -103,6 +103,15 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
     const [answeredOptions, setAnsweredOptions] = useState<Record<string, string>>({});
     const [saveError, setSaveError] = useState<string | null>(null);
     const [isSaving, setIsSaving] = useState(false);
+    /**
+     * streamError + autoRetryRef: en Safari iOS el stream de
+     * /api/triage a veces se corta silenciosamente (el SDK termina
+     * onFinish con content vacío o no-JSON, sin disparar onError).
+     * Cuando eso ocurre intentamos un reload() automático una vez;
+     * si vuelve a fallar mostramos un banner con botón "Reintentar".
+     */
+    const [streamError, setStreamError] = useState<string | null>(null);
+    const autoRetryRef = useRef(false);
     const pendingPayloadRef = useRef<ClinicalRecordPayload | null>(null);
     const demographicsRef = useRef(demographics);
     const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -145,10 +154,54 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
         append,
     } = useChat({
         api: '/api/triage',
+        onError: (err) => {
+            // Stream / network / 5xx — muestra un banner accionable.
+            // No reintenta automáticamente aquí porque el SDK ya
+            // terminó mal el ciclo; el usuario toca "Reintentar".
+            console.error('[triage] stream onError:', err);
+            setStreamError(
+                'La conexión con el asistente se interrumpió. Por favor reintente o describa sus síntomas nuevamente.',
+            );
+        },
         onFinish: async (message) => {
             try {
                 const json = extractJSON<TriageResponse>(message.content);
-                if (!json) return;
+                // Stream terminó pero el contenido es vacío / no-JSON:
+                // síntoma típico de Safari iOS cuando el stream se cae a
+                // mitad. Intentamos un reload() automático una sola vez;
+                // si tras el reintento sigue sin JSON, mostramos banner.
+                if (!json) {
+                    const content = (message.content ?? '').trim();
+                    const isEmptyOrPartial =
+                        content.length === 0 ||
+                        !content.includes('{') ||
+                        !content.includes('}');
+                    if (isEmptyOrPartial && !autoRetryRef.current) {
+                        autoRetryRef.current = true;
+                        // El SDK ya escribió el mensaje vacío del asistente
+                        // en la lista; reload() lo regenera con la misma
+                        // última entrada del usuario.
+                        try {
+                            await reload();
+                        } catch (e) {
+                            console.error('[triage] auto-retry reload failed:', e);
+                            setStreamError(
+                                'La conexión con el asistente se interrumpió. Por favor reintente o describa sus síntomas nuevamente.',
+                            );
+                        }
+                        return;
+                    }
+                    if (isEmptyOrPartial) {
+                        setStreamError(
+                            'La conexión con el asistente se interrumpió. Por favor reintente o describa sus síntomas nuevamente.',
+                        );
+                    }
+                    return;
+                }
+                // Stream llegó con JSON válido — reseteamos el retry guard
+                // para que un fallo futuro vuelva a tener su único reintento.
+                autoRetryRef.current = false;
+                setStreamError(null);
                 // Finalize on any payload that names a valid ESI level
                 // and no longer asks the patient anything — regardless
                 // of whether `status` is exactly 'success'. The model
@@ -299,10 +352,17 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
     };
 
     const handleRetry = () => {
+        // Reset the stream-error state so the banner disappears as the
+        // new request starts; reload() re-issues the last user turn.
+        setStreamError(null);
+        autoRetryRef.current = false;
         try {
             reload();
         } catch (e) {
             console.error('[triage] reload failed:', e);
+            setStreamError(
+                'No se pudo reintentar automáticamente. Vuelva a describir sus síntomas en el cuadro de texto.',
+            );
         }
     };
 
@@ -322,7 +382,8 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
             (latestAssistantPayload.error || latestAssistantPayload.status === 'error'),
     );
     const showErrorBanner =
-        !isLoading && (Boolean(error) || latestAssistantHasError);
+        !isLoading &&
+        (Boolean(error) || latestAssistantHasError || Boolean(streamError));
 
     // Final success screen — anonymous code reveal.
     if (isFinished && anonymousCode) {
@@ -451,7 +512,8 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
                                     </span>
                                 </div>
                                 <p className="text-sm leading-relaxed">
-                                    {latestAssistantPayload?.message ||
+                                    {streamError ||
+                                        latestAssistantPayload?.message ||
                                         'Hubo un problema temporal con el asistente clínico. Por favor, inténtelo nuevamente o describa sus síntomas directamente al personal de enfermería. Si presenta una emergencia, llame al 131.'}
                                 </p>
                                 <button
