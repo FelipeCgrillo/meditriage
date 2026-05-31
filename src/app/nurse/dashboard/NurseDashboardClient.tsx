@@ -188,12 +188,26 @@ export default function NurseDashboardClient({
             ),
         );
 
-        const { error: updateError } = await supabase
-            .from('clinical_records')
-            .update({ nurse_validated: true, nurse_override_level: nurseEsi })
-            .eq('id', recordId);
+        // Capturar el usuario actual para registrar nurse_id
+        const { data: { user } } = await supabase.auth.getUser();
 
-        if (updateError) {
+        const payload: { nurse_validated: boolean; nurse_override_level: number; nurse_id?: string } = {
+            nurse_validated: true,
+            nurse_override_level: nurseEsi,
+        };
+        if (user?.id) {
+            payload.nurse_id = user.id;
+        }
+
+        // .select() devuelve las filas modificadas, lo que permite detectar
+        // updates silenciados por RLS (data.length === 0 sin error).
+        const { data, error: updateError } = await supabase
+            .from('clinical_records')
+            .update(payload)
+            .eq('id', recordId)
+            .select();
+
+        if (updateError || !data || data.length === 0) {
             // Rollback
             setRecords((prev) =>
                 prev.map((r) =>
@@ -202,7 +216,11 @@ export default function NurseDashboardClient({
                         : r,
                 ),
             );
-            alert(`Error al guardar la clasificación: ${updateError.message}`);
+            const msg = updateError
+                ? `Error al guardar la clasificación: ${updateError.message}`
+                : 'La clasificación no se pudo guardar (0 filas afectadas). Es probable que la sesión haya expirado o no tengas permisos. Cierra sesión y vuelve a entrar.';
+            console.error('[handleClassify] Fallo al guardar', { recordId, nurseEsi, error: updateError, data });
+            alert(msg);
         }
     }
 
