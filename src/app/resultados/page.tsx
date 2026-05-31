@@ -21,17 +21,30 @@ interface ClinicalRecordForAnalysis {
     nurse_validated: boolean;
 }
 
+interface KappaWithCI {
+    value: number;
+    ciLower: number;
+    ciUpper: number;
+}
+
 interface StudyMetrics {
     totalRecords: number;
     validatedRecords: number;
     exactAccuracy: number;
-    kappaCoefficient: number;
+    kappaSimple: KappaWithCI;
+    kappaLinear: KappaWithCI;
+    kappaQuadratic: KappaWithCI;
     subTriageRate: number;
     overTriageRate: number;
-    confusionMatrix: number[][];
+    confusionMatrix: number[][]; // Orientación: filas = IA, columnas = Enfermera (tesis §2.3)
     accuracyByGender: { male: number; female: number; unknown: number; maleN: number; femaleN: number; unknownN: number };
     accuracyByAgeGroup: { pediatric: number; adult: number; geriatric: number; unknown: number; pediatricN: number; adultN: number; geriatricN: number; unknownN: number };
 }
+
+// Tamaño muestral objetivo según tesis §3.5 (fórmula de Donner)
+const SAMPLE_SIZE_MIN = 230;
+const SAMPLE_SIZE_MAX = 300;
+const BOOTSTRAP_ITERATIONS = 1000;
 
 // =============================================================================
 // METRICS CALCULATION - Cohen's Kappa & Confusion Matrix
@@ -72,9 +85,9 @@ function calculateStudyMetrics(records: ClinicalRecordForAnalysis[]): StudyMetri
         const nurseIdx = nurseEsi - 1;
         const aiIdx = aiEsi - 1;
 
-        // Bounds check
+        // Orientación según tesis §2.3 (líneas 2096-2105): filas = IA, columnas = Enfermera
         if (nurseIdx >= 0 && nurseIdx < 5 && aiIdx >= 0 && aiIdx < 5) {
-            matrix[nurseIdx][aiIdx]++;
+            matrix[aiIdx][nurseIdx]++;
         }
 
         const isMatch = aiEsi === nurseEsi;
@@ -107,8 +120,11 @@ function calculateStudyMetrics(records: ClinicalRecordForAnalysis[]): StudyMetri
         }
     }
 
-    // Calculate Cohen's Kappa
-    const kappa = calculateCohenKappa(matrix, n);
+    // Calcular los tres Kappa con IC 95% por bootstrap (tesis §2.4)
+    const pairs: Array<[number, number]> = validRecords.map(r => [r.esi_level, r.nurse_override_level!]);
+    const kappaSimple = calculateKappaWithCI(pairs, 'simple');
+    const kappaLinear = calculateKappaWithCI(pairs, 'linear');
+    const kappaQuadratic = calculateKappaWithCI(pairs, 'quadratic');
 
     // Calculate accuracy percentages
     const safePercent = (correct: number, total: number) => total > 0 ? (correct / total) * 100 : 0;
@@ -117,7 +133,9 @@ function calculateStudyMetrics(records: ClinicalRecordForAnalysis[]): StudyMetri
         totalRecords: records.length,
         validatedRecords: n,
         exactAccuracy: n > 0 ? (exactMatches / n) * 100 : 0,
-        kappaCoefficient: kappa,
+        kappaSimple,
+        kappaLinear,
+        kappaQuadratic,
         subTriageRate: n > 0 ? (subTriageCount / n) * 100 : 0,
         overTriageRate: n > 0 ? (overTriageCount / n) * 100 : 0,
         confusionMatrix: matrix,
@@ -142,31 +160,95 @@ function calculateStudyMetrics(records: ClinicalRecordForAnalysis[]): StudyMetri
     };
 }
 
-function calculateCohenKappa(matrix: number[][], n: number): number {
+type KappaWeight = 'simple' | 'linear' | 'quadratic';
+
+// Pesos según tesis §2.4 (líneas 2113-2127):
+//   - Simple (Cohen sin ponderar): peso 1 si i===j, 0 si i!==j
+//   - Lineal: 1 - |i-j|/(k-1)
+//   - Cuadrático: 1 - (i-j)^2/(k-1)^2
+function weight(i: number, j: number, scheme: KappaWeight, k: number = 5): number {
+    const diff = Math.abs(i - j);
+    if (scheme === 'simple') return diff === 0 ? 1 : 0;
+    if (scheme === 'linear') return 1 - diff / (k - 1);
+    // quadratic
+    return 1 - (diff * diff) / ((k - 1) * (k - 1));
+}
+
+function calculateWeightedKappaFromPairs(pairs: Array<[number, number]>, scheme: KappaWeight): number {
+    const n = pairs.length;
     if (n === 0) return 0;
 
-    // Observed agreement (Po)
-    let po = 0;
-    for (let i = 0; i < 5; i++) {
-        po += matrix[i][i];
+    // Construir matriz 5x5 (filas IA, columnas enfermera) — consistente con la tesis
+    const matrix: number[][] = Array(5).fill(null).map(() => Array(5).fill(0));
+    for (const [aiEsi, nurseEsi] of pairs) {
+        const aiIdx = aiEsi - 1;
+        const nurseIdx = nurseEsi - 1;
+        if (aiIdx >= 0 && aiIdx < 5 && nurseIdx >= 0 && nurseIdx < 5) {
+            matrix[aiIdx][nurseIdx]++;
+        }
     }
-    po /= n;
 
-    // Expected agreement (Pe)
+    // Marginales
+    const rowSums = matrix.map(row => row.reduce((a, b) => a + b, 0));
+    const colSums = Array(5).fill(0);
+    for (let i = 0; i < 5; i++) {
+        for (let j = 0; j < 5; j++) {
+            colSums[j] += matrix[i][j];
+        }
+    }
+
+    // Acuerdo observado (Po) y esperado (Pe) ponderados
+    let po = 0;
     let pe = 0;
     for (let i = 0; i < 5; i++) {
-        let rowSum = 0;
-        let colSum = 0;
         for (let j = 0; j < 5; j++) {
-            rowSum += matrix[i][j];
-            colSum += matrix[j][i];
+            const w = weight(i, j, scheme);
+            po += (w * matrix[i][j]) / n;
+            pe += (w * rowSums[i] * colSums[j]) / (n * n);
         }
-        pe += (rowSum / n) * (colSum / n);
     }
 
-    // Kappa = (Po - Pe) / (1 - Pe)
     if (pe === 1) return 1;
     return (po - pe) / (1 - pe);
+}
+
+// IC 95% por bootstrap percentil (tesis §3.5 menciona bootstrap)
+function calculateKappaWithCI(pairs: Array<[number, number]>, scheme: KappaWeight): KappaWithCI {
+    const n = pairs.length;
+    if (n === 0) return { value: 0, ciLower: 0, ciUpper: 0 };
+
+    const pointEstimate = calculateWeightedKappaFromPairs(pairs, scheme);
+
+    // Para muestras pequeñas (n < 5) no calculamos IC
+    if (n < 5) return { value: pointEstimate, ciLower: pointEstimate, ciUpper: pointEstimate };
+
+    // Bootstrap con resampleo con reemplazo. RNG simple determinista por seed
+    // (Mulberry32) para reproducibilidad en el dashboard.
+    let seed = n * 1000 + Math.floor(pointEstimate * 1e6);
+    const rng = () => {
+        seed = (seed + 0x6D2B79F5) | 0;
+        let t = seed;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+
+    const estimates: number[] = [];
+    for (let b = 0; b < BOOTSTRAP_ITERATIONS; b++) {
+        const sample: Array<[number, number]> = new Array(n);
+        for (let i = 0; i < n; i++) {
+            sample[i] = pairs[Math.floor(rng() * n)];
+        }
+        estimates.push(calculateWeightedKappaFromPairs(sample, scheme));
+    }
+    estimates.sort((a, b) => a - b);
+    const lowerIdx = Math.floor(0.025 * BOOTSTRAP_ITERATIONS);
+    const upperIdx = Math.floor(0.975 * BOOTSTRAP_ITERATIONS);
+    return {
+        value: pointEstimate,
+        ciLower: estimates[lowerIdx],
+        ciUpper: estimates[upperIdx]
+    };
 }
 
 function interpretKappa(kappa: number): string {
@@ -176,6 +258,72 @@ function interpretKappa(kappa: number): string {
     if (kappa < 0.60) return 'Acuerdo Moderado';
     if (kappa < 0.80) return 'Acuerdo Sustancial';
     return 'Acuerdo Casi Perfecto';
+}
+
+// Exportación CSV de los registros validados
+function recordsToCSV(records: ClinicalRecordForAnalysis[]): string {
+    const headers = [
+        'id',
+        'anonymous_code',
+        'esi_ia',
+        'esi_enfermera',
+        'concordancia',
+        'diferencia',
+        'tipo_discrepancia',
+        'patient_gender',
+        'patient_age_group',
+        'consent_eligible',
+        'nurse_validated'
+    ];
+    const lines = [headers.join(',')];
+    for (const r of records) {
+        const nurseEsi = r.nurse_override_level;
+        const aiEsi = r.esi_level;
+        const concordancia = nurseEsi !== null && nurseEsi === aiEsi ? '1' : '0';
+        const diferencia = nurseEsi !== null ? (aiEsi - nurseEsi).toString() : '';
+        let tipoDiscrepancia = '';
+        if (nurseEsi !== null) {
+            if (aiEsi === nurseEsi) tipoDiscrepancia = 'concordancia';
+            else if (aiEsi > nurseEsi) tipoDiscrepancia = 'sub-triaje';
+            else tipoDiscrepancia = 'sobre-triaje';
+        }
+        const cells = [
+            r.id,
+            r.anonymous_code ?? '',
+            aiEsi.toString(),
+            nurseEsi !== null ? nurseEsi.toString() : '',
+            concordancia,
+            diferencia,
+            tipoDiscrepancia,
+            r.patient_gender ?? '',
+            r.patient_age_group ?? '',
+            r.consent_eligible === null ? '' : (r.consent_eligible ? 'true' : 'false'),
+            r.nurse_validated ? 'true' : 'false'
+        ];
+        // CSV escaping básico (los campos no deberían contener comas, pero por si acaso)
+        const escaped = cells.map(c => {
+            const s = String(c);
+            if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+                return '"' + s.replace(/"/g, '""') + '"';
+            }
+            return s;
+        });
+        lines.push(escaped.join(','));
+    }
+    return lines.join('\n');
+}
+
+function downloadCSV(filename: string, csv: string): void {
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
 }
 
 // =============================================================================
@@ -280,25 +428,36 @@ function ConfusionMatrixChart({ matrix }: { matrix: number[][] }) {
         return 'bg-gray-50 text-gray-400';
     };
 
+    // Marginales para el total por fila/columna
+    const rowTotals = matrix.map(row => row.reduce((a, b) => a + b, 0));
+    const colTotals = Array(5).fill(0).map((_, j) => matrix.reduce((sum, row) => sum + row[j], 0));
+    const grandTotal = rowTotals.reduce((a, b) => a + b, 0);
+
     return (
         <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
-            <h3 className="text-lg font-bold text-gray-900 mb-2">Matriz de Concordancia</h3>
-            <p className="text-sm text-gray-500 mb-4">Enfermero (Filas) vs. IA (Columnas)</p>
+            <h3 className="text-lg font-bold text-gray-900 mb-2">Matriz de Concordancia 5×5</h3>
+            <p className="text-sm text-gray-500 mb-4">IA (Filas) vs. Enfermera (Columnas) — según tesis §2.3</p>
 
             <div className="overflow-x-auto">
                 <table className="w-full border-collapse">
                     <thead>
                         <tr>
                             <th className="p-2 text-xs text-gray-400"></th>
+                            <th colSpan={5} className="p-2 text-xs font-bold text-emerald-700 text-center">Enfermera</th>
+                            <th className="p-2 text-xs text-gray-400"></th>
+                        </tr>
+                        <tr>
+                            <th className="p-2 text-xs font-bold text-blue-700">IA</th>
                             {labels.map((l, i) => (
-                                <th key={i} className="p-2 text-xs font-semibold text-blue-700 bg-blue-50 rounded">{l}</th>
+                                <th key={i} className="p-2 text-xs font-semibold text-emerald-700 bg-emerald-50 rounded">{l}</th>
                             ))}
+                            <th className="p-2 text-xs font-semibold text-gray-500">Total</th>
                         </tr>
                     </thead>
                     <tbody>
                         {matrix.map((row, i) => (
                             <tr key={i}>
-                                <td className="p-2 text-xs font-semibold text-emerald-700 bg-emerald-50 rounded">{labels[i]}</td>
+                                <td className="p-2 text-xs font-semibold text-blue-700 bg-blue-50 rounded">{labels[i]}</td>
                                 {row.map((val, j) => (
                                     <td key={j} className="p-1">
                                         <div className={`w-12 h-12 flex items-center justify-center rounded-lg font-bold text-sm ${getColor(val, i === j)} ${i === j ? 'ring-2 ring-emerald-400' : ''}`}>
@@ -306,15 +465,110 @@ function ConfusionMatrixChart({ matrix }: { matrix: number[][] }) {
                                         </div>
                                     </td>
                                 ))}
+                                <td className="p-1 text-center text-sm font-semibold text-gray-600">{rowTotals[i]}</td>
                             </tr>
                         ))}
+                        <tr>
+                            <td className="p-2 text-xs font-semibold text-gray-500">Total</td>
+                            {colTotals.map((t, j) => (
+                                <td key={j} className="p-1 text-center text-sm font-semibold text-gray-600">{t}</td>
+                            ))}
+                            <td className="p-1 text-center text-sm font-bold text-gray-900">{grandTotal}</td>
+                        </tr>
                     </tbody>
                 </table>
             </div>
 
             <div className="mt-4 pt-4 border-t flex justify-center gap-6 text-xs text-gray-500">
-                <span className="flex items-center gap-2"><div className="w-4 h-4 rounded bg-emerald-500"></div> Concordancia</span>
-                <span className="flex items-center gap-2"><div className="w-4 h-4 rounded bg-red-300"></div> Discordancia</span>
+                <span className="flex items-center gap-2"><div className="w-4 h-4 rounded bg-emerald-500"></div> Concordancia (diagonal)</span>
+                <span className="flex items-center gap-2"><div className="w-4 h-4 rounded bg-red-300"></div> Discordancia &gt; 5</span>
+            </div>
+        </div>
+    );
+}
+
+function SampleProgressCard({ current, min, max }: { current: number; min: number; max: number }) {
+    const pctMin = Math.min(100, (current / min) * 100);
+    const pctMax = Math.min(100, (current / max) * 100);
+    const reachedMin = current >= min;
+    const reachedMax = current >= max;
+
+    const status = reachedMax ? 'COMPLETO' : reachedMin ? 'OBJETIVO MÍNIMO ALCANZADO' : 'RECLUTANDO';
+    const statusColor = reachedMax
+        ? 'bg-emerald-100 text-emerald-700'
+        : reachedMin
+            ? 'bg-blue-100 text-blue-700'
+            : 'bg-amber-100 text-amber-700';
+    const barColor = reachedMax ? 'bg-emerald-500' : reachedMin ? 'bg-blue-500' : 'bg-amber-500';
+
+    return (
+        <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+            <div className="flex items-start justify-between mb-4">
+                <div>
+                    <h3 className="text-lg font-bold text-gray-900">Progreso del Reclutamiento</h3>
+                    <p className="text-sm text-gray-500">Fórmula de Donner — tesis §3.5</p>
+                </div>
+                <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${statusColor}`}>
+                    <span className={`w-2 h-2 rounded-full ${reachedMax ? 'bg-emerald-500' : reachedMin ? 'bg-blue-500' : 'bg-amber-500'}`}></span>
+                    {status}
+                </span>
+            </div>
+
+            <div className="flex items-baseline gap-2 mb-3">
+                <span className="text-4xl font-bold text-gray-900">{current}</span>
+                <span className="text-sm text-gray-500">/ {min}–{max} casos validados</span>
+            </div>
+
+            <div className="relative h-4 bg-gray-100 rounded-full overflow-hidden mb-1">
+                <div className={`h-full ${barColor} transition-all duration-500`} style={{ width: `${pctMax}%` }}></div>
+                {/* Marca del mínimo (n=230) */}
+                <div
+                    className="absolute top-0 bottom-0 border-l-2 border-dashed border-gray-400"
+                    style={{ left: `${(min / max) * 100}%` }}
+                    title={`Mínimo: n=${min}`}
+                ></div>
+            </div>
+            <div className="flex justify-between text-xs text-gray-500">
+                <span>0</span>
+                <span className="text-gray-700 font-semibold">n mínimo {min} ({pctMin.toFixed(0)}%)</span>
+                <span>n objetivo {max}</span>
+            </div>
+
+            {!reachedMin && (
+                <p className="mt-4 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                    Faltan <strong>{min - current} casos</strong> validados para alcanzar el tamaño muestral mínimo. Sin n ≥ {min}, el poder estadístico será insuficiente para contrastar H₁: κ ≥ 0,85.
+                </p>
+            )}
+            {reachedMin && !reachedMax && (
+                <p className="mt-4 text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-lg p-3">
+                    Objetivo mínimo alcanzado. Continúar hasta n = {max} mejora la estabilidad de la matriz de confusión y los análisis estratificados.
+                </p>
+            )}
+            {reachedMax && (
+                <p className="mt-4 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                    Tamaño muestral objetivo alcanzado. Se cuenta con poder estadístico suficiente para cerrar el OE4.
+                </p>
+            )}
+        </div>
+    );
+}
+
+function KappaCard({ label, kappa, highlight }: { label: string; kappa: KappaWithCI; highlight?: boolean }) {
+    const interpretation = interpretKappa(kappa.value);
+    const bg = highlight
+        ? 'bg-gradient-to-br from-blue-900 to-indigo-900 border-blue-700'
+        : 'bg-white border-gray-200';
+    const valueColor = highlight ? 'text-amber-400' : 'text-gray-900';
+    const labelColor = highlight ? 'text-blue-200' : 'text-gray-500';
+    const subColor = highlight ? 'text-blue-300' : 'text-gray-500';
+
+    return (
+        <div className={`rounded-2xl border-2 ${bg} p-5 shadow-sm`}>
+            <p className={`text-xs font-semibold uppercase tracking-wide ${labelColor}`}>{label}</p>
+            <p className={`text-3xl font-bold mt-1 ${valueColor}`}>{kappa.value.toFixed(3)}</p>
+            <p className={`text-xs mt-1 ${subColor}`}>IC 95%: [{kappa.ciLower.toFixed(3)}, {kappa.ciUpper.toFixed(3)}]</p>
+            <div className={`mt-3 inline-block px-2.5 py-1 rounded-full text-xs font-semibold ${highlight ? 'bg-amber-400/20 text-amber-300' : 'bg-blue-100 text-blue-700'}`}>
+                {interpretation}
             </div>
         </div>
     );
@@ -535,6 +789,22 @@ export default function ResultadosPage() {
                             />
                             <span className="text-sm font-medium text-gray-700">Solo Elegibles</span>
                         </label>
+                        <button
+                            onClick={() => {
+                                const csv = recordsToCSV(filteredRecords);
+                                const stamp = new Date().toISOString().slice(0, 10);
+                                const suffix = eligibleOnly ? '-elegibles' : '';
+                                downloadCSV(`meditriage-export${suffix}-${stamp}.csv`, csv);
+                            }}
+                            disabled={filteredRecords.length === 0}
+                            className="flex items-center gap-2 px-3 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+                            title="Exportar datos a CSV para análisis estadístico externo (R / Python / Excel)"
+                        >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                            </svg>
+                            <span className="hidden sm:inline">Exportar CSV</span>
+                        </button>
                         <button onClick={fetchData} className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700" title="Actualizar datos">
                             <RefreshIcon />
                         </button>
@@ -576,12 +846,14 @@ export default function ResultadosPage() {
                         subtext="IA = Enfermero"
                     />
                     <KPICard
-                        value={metrics.validatedRecords > 0 ? metrics.kappaCoefficient.toFixed(2) : '—'}
+                        value={metrics.validatedRecords > 0 ? metrics.kappaSimple.value.toFixed(2) : '—'}
                         label="Kappa de Cohen"
                         icon={<StarIcon />}
                         variant="highlight"
-                        badge={metrics.validatedRecords > 0 ? interpretKappa(metrics.kappaCoefficient) : 'Sin datos'}
-                        subtext="Acuerdo más allá del azar"
+                        badge={metrics.validatedRecords > 0 ? interpretKappa(metrics.kappaSimple.value) : 'Sin datos'}
+                        subtext={metrics.validatedRecords > 0
+                            ? `IC 95%: [${metrics.kappaSimple.ciLower.toFixed(2)}, ${metrics.kappaSimple.ciUpper.toFixed(2)}]`
+                            : 'Acuerdo más allá del azar'}
                     />
                     <KPICard
                         value={metrics.validatedRecords > 0 ? `${metrics.subTriageRate.toFixed(1)}%` : '—'}
@@ -592,6 +864,33 @@ export default function ResultadosPage() {
                         subtext="IA subestima gravedad"
                     />
                 </section>
+
+                {/* SAMPLE SIZE PROGRESS — tesis §3.5 */}
+                <SampleProgressCard
+                    current={metrics.validatedRecords}
+                    min={SAMPLE_SIZE_MIN}
+                    max={SAMPLE_SIZE_MAX}
+                />
+
+                {/* WEIGHTED KAPPA SECTION — tesis §2.4 */}
+                {metrics.validatedRecords > 0 && (
+                    <section className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+                        <div className="flex items-start justify-between mb-4 flex-wrap gap-3">
+                            <div>
+                                <h2 className="text-xl font-bold text-gray-900">Coeficientes Kappa — ESI como escala ordinal</h2>
+                                <p className="text-sm text-gray-500">Tres ponderaciones con IC 95% por bootstrap (1000 iteraciones). H₁ del estudio: κ ≥ 0,85.</p>
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <KappaCard label="Kappa Simple (Cohen)" kappa={metrics.kappaSimple} />
+                            <KappaCard label="Kappa Lineal Ponderado" kappa={metrics.kappaLinear} highlight />
+                            <KappaCard label="Kappa Cuadrático Ponderado" kappa={metrics.kappaQuadratic} />
+                        </div>
+                        <div className="mt-4 text-xs text-gray-500 bg-gray-50 rounded-lg p-3">
+                            <strong className="text-gray-700">Pesos según tesis §2.4:</strong> Simple = 1 si i=j, 0 si i≠j • Lineal = 1 - |i-j|/4 • Cuadrático = 1 - (i-j)²/16. La versión cuadrática es la recomendada para escalas ordinales como ESI.
+                        </div>
+                    </section>
+                )}
 
                 {/* MAIN CONTENT */}
                 {metrics.validatedRecords === 0 ? (
@@ -661,7 +960,7 @@ export default function ResultadosPage() {
                         </div>
                         <div>
                             <strong className="text-gray-800">Kappa de Cohen:</strong>
-                            <p>Mide acuerdo más allá del azar. &gt;0.80 = casi perfecto.</p>
+                            <p>Mide acuerdo más allá del azar. &gt;0.80 = casi perfecto. Para ESI se recomienda la versión ponderada (lineal o cuadrática) por ser escala ordinal.</p>
                         </div>
                         <div>
                             <strong className="text-gray-800">Elegibilidad:</strong>
@@ -669,7 +968,7 @@ export default function ResultadosPage() {
                         </div>
                     </div>
                     <div className="mt-4 pt-4 border-t text-center text-xs text-gray-400">
-                        Datos en tiempo real desde Supabase • {new Date().getFullYear()}
+                        Datos en tiempo real desde Supabase • IC 95% por bootstrap (1000 iter.) • {new Date().getFullYear()}
                     </div>
                 </footer>
             </main>
