@@ -37,7 +37,14 @@ export async function POST(req: Request) {
         }
 
         type ChatMessage = { role: 'user' | 'assistant' | 'system'; content: string };
-        const { messages } = body as { messages?: ChatMessage[] };
+        type Demographics = {
+            gender?: string | null;
+            ageGroup?: string | null;
+        };
+        const { messages, demographics } = body as {
+            messages?: ChatMessage[];
+            demographics?: Demographics;
+        };
 
         if (!messages || messages.length === 0) {
             return new Response(JSON.stringify({ error: 'Messages are required' }), {
@@ -45,6 +52,43 @@ export async function POST(req: Request) {
                 headers: { 'Content-Type': 'application/json' },
             });
         }
+
+        // ---------------------------------------------------------------
+        // Bloque de contexto demográfico.
+        //
+        // El cliente ya recolectó género biológico y grupo etario en el
+        // wizard de consentimiento, pero ese flujo ocurre fuera del
+        // stream con el modelo. Si no se inyecta aquí, el modelo no lo
+        // sabe y puede:
+        //   - Preguntar el sexo otra vez.
+        //   - Hacer preguntas anatómicamente imposibles (ej: sangrado
+        //     vaginal a un paciente masculino).
+        //
+        // Lo agregamos como un mensaje system adicional (después del
+        // prompt principal) usando un nombre legible para humanos.
+        // ---------------------------------------------------------------
+        const GENDER_LABEL: Record<string, string> = {
+            M: 'masculino',
+            F: 'femenino',
+            Other: 'otro',
+            'Prefer not to say': 'no declarado',
+        };
+        const AGE_LABEL: Record<string, string> = {
+            Pediatric: 'pediátrico (0-17 años)',
+            Adult: 'adulto (18-64 años)',
+            Geriatric: 'geriátrico (65+ años)',
+        };
+        const genderText = demographics?.gender
+            ? GENDER_LABEL[demographics.gender] ?? demographics.gender
+            : 'no declarado';
+        const ageText = demographics?.ageGroup
+            ? AGE_LABEL[demographics.ageGroup] ?? demographics.ageGroup
+            : 'no declarado';
+        const demographicsSystemMessage = `### CONTEXTO DEL PACIENTE (ya recolectado en consentimiento)
+Sexo biológico declarado: ${genderText}.
+Grupo etario declarado: ${ageText}.
+
+Usa estos datos para tus decisiones clínicas. NO los preguntes de nuevo. NO formules preguntas anatómicamente imposibles para el sexo declarado.`;
 
         const lastUserMessage = messages[messages.length - 1];
         if (lastUserMessage.role !== 'user') {
@@ -72,7 +116,7 @@ export async function POST(req: Request) {
 
         const result = await streamText({
             model: anthropic(modelId),
-            system: TRIAGE_SYSTEM_PROMPT,
+            system: `${TRIAGE_SYSTEM_PROMPT}\n\n${demographicsSystemMessage}`,
             messages: sanitizedMessages,
             temperature: 0.1,
         });

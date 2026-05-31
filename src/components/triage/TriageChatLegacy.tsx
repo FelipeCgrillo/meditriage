@@ -131,6 +131,25 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
         demographicsRef.current = demographics;
     }, [demographics]);
 
+    // Helper: arma el body adicional que viaja con cada POST a
+    // /api/triage. Se lee SIEMPRE el valor más reciente del ref
+    // (no del closure) para evitar el bug clásico de "stale body"
+    // del useChat de Vercel AI SDK v3: el `body` declarado a nivel
+    // de hook se evalúa solo en el primer render y, como
+    // demographics se setea después del wizard, quedábamos
+    // mandando { gender: null, ageGroup: null } en todas las
+    // requests — por eso el modelo preguntaba el sexo otra vez y
+    // hacía preguntas anatómicamente imposibles.
+    const buildDemographicsBody = useCallback(
+        () => ({
+            demographics: {
+                gender: demographicsRef.current.gender,
+                ageGroup: demographicsRef.current.ageGroup,
+            },
+        }),
+        [],
+    );
+
     const messagesRef = useRef<Array<{ role: string; content: string }>>([]);
 
     const persistRecord = useCallback(
@@ -213,7 +232,7 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
                         // en la lista; reload() lo regenera con la misma
                         // última entrada del usuario.
                         try {
-                            await reload();
+                            await reload({ options: { body: buildDemographicsBody() } });
                         } catch (e) {
                             console.error('[triage] auto-retry reload failed:', e);
                             setStreamError(
@@ -456,7 +475,10 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
     const handleAIQuickReply = (messageId: string, option: string) => {
         if (isLoading || answeredOptions[messageId]) return;
         setAnsweredOptions((prev) => ({ ...prev, [messageId]: option }));
-        append({ role: 'user', content: option });
+        append(
+            { role: 'user', content: option },
+            { options: { body: buildDemographicsBody() } },
+        );
     };
 
     const handleRetry = () => {
@@ -465,7 +487,7 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
         setStreamError(null);
         autoRetryRef.current = false;
         try {
-            reload();
+            reload({ options: { body: buildDemographicsBody() } });
         } catch (e) {
             console.error('[triage] reload failed:', e);
             setStreamError(
@@ -664,7 +686,7 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
                         if (inputDisabled) return;
                         if (input.trim().length < MIN_INPUT_LENGTH) return;
                         if (isListening) stopSpeech();
-                        handleSubmit(e);
+                        handleSubmit(e, { options: { body: buildDemographicsBody() } });
                     }}
                     className="flex items-end gap-2 md:gap-3 max-w-4xl mx-auto bg-white rounded-full shadow-xl shadow-indigo-100/50 px-2 md:px-3 py-2 border border-indigo-50"
                 >
