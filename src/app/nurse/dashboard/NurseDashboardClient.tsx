@@ -84,6 +84,22 @@ function formatDate(iso: string): string {
     }
 }
 
+/**
+ * Renderiza una fecha localizada SOLO en el cliente para evitar
+ * hydration mismatches (React #418/#423/#425) cuando el servidor (UTC)
+ * y el cliente (zona horaria del usuario) producen strings distintos.
+ *
+ * En SSR y antes de hidratar muestra un placeholder estable ("—"),
+ * luego de hidratar se reemplaza por la fecha localizada.
+ */
+function ClientDate({ iso }: { iso: string }) {
+    const [text, setText] = useState<string>('—');
+    useEffect(() => {
+        setText(formatDate(iso));
+    }, [iso]);
+    return <span suppressHydrationWarning>{text}</span>;
+}
+
 function genderText(g: string | null): string | null {
     if (!g) return null;
     return GENDER_LABEL[g] ?? g;
@@ -435,7 +451,7 @@ function RecordCard({
                                 {record.symptoms_text || 'Sin síntomas registrados'}
                             </p>
                             <div className="flex items-center gap-3 mt-2 text-xs text-gray-500 flex-wrap">
-                                <span>{formatDate(record.created_at)}</span>
+                                <ClientDate iso={record.created_at} />
                                 {genderText(record.patient_gender) && (
                                     <span>· {genderText(record.patient_gender)}</span>
                                 )}
@@ -487,7 +503,7 @@ function RecordCard({
                                 <span className="text-xs text-gray-500 uppercase font-medium block">
                                     Fecha de ingreso
                                 </span>
-                                <span className="text-gray-900">{formatDate(record.created_at)}</span>
+                                <span className="text-gray-900"><ClientDate iso={record.created_at} /></span>
                             </div>
                         </div>
 
