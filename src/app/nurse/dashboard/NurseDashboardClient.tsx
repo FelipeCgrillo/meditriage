@@ -4,6 +4,28 @@ import { useEffect, useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
 
+/**
+ * Panel de Enfermería — Evaluación Ciega Independiente
+ *
+ * Filosofía de diseño:
+ *   La enfermera y la IA son DOS evaluadores INDEPENDIENTES del mismo
+ *   caso clínico. La enfermera nunca ve el ESI propuesto por la IA
+ *   antes de clasificar, para no contaminar su criterio (sesgo de
+ *   anclaje). Después de que la enfermera clasifica, se revelan los
+ *   dos resultados lado a lado.
+ *
+ *   AMBAS clasificaciones se guardan en la BD:
+ *     - esi_level            → ESI propuesto por la IA
+ *     - nurse_override_level → ESI asignado por la enfermera
+ *   Ninguna sobrescribe a la otra. El panel del investigador
+ *   construirá la matriz 5×5 de concordancia (Coeficiente Kappa)
+ *   a partir de los dos campos.
+ *
+ *   No hay 'override' ni 'validación' — la enfermera CLASIFICA, no
+ *   valida. La IA propone, la enfermera evalúa, ambas evaluaciones
+ *   son datos para el estudio.
+ */
+
 export interface ClinicalRecord {
     id: string;
     anonymous_code: string | null;
@@ -34,6 +56,19 @@ const esiColors: Record<number, { bg: string; text: string; border: string; labe
     5: { bg: 'bg-blue-100', text: 'text-blue-800', border: 'border-blue-300', label: 'No urgente' },
 };
 
+const GENDER_LABEL: Record<string, string> = {
+    M: 'Masculino',
+    F: 'Femenino',
+    Other: 'Otro',
+    'Prefer not to say': 'No declarado',
+};
+
+const AGE_GROUP_LABEL: Record<string, string> = {
+    Pediatric: 'Pediátrico (0-17)',
+    Adult: 'Adulto (18-64)',
+    Geriatric: 'Geriátrico (65+)',
+};
+
 function formatDate(iso: string): string {
     try {
         const d = new Date(iso);
@@ -49,6 +84,16 @@ function formatDate(iso: string): string {
     }
 }
 
+function genderText(g: string | null): string | null {
+    if (!g) return null;
+    return GENDER_LABEL[g] ?? g;
+}
+
+function ageGroupText(a: string | null): string | null {
+    if (!a) return null;
+    return AGE_GROUP_LABEL[a] ?? a;
+}
+
 export default function NurseDashboardClient({
     initialRecords,
     initialError,
@@ -58,13 +103,11 @@ export default function NurseDashboardClient({
     const router = useRouter();
     const [records, setRecords] = useState<ClinicalRecord[]>(initialRecords);
     const [error] = useState<string | null>(initialError);
-    const [filterEsi, setFilterEsi] = useState<number | null>(null);
-    const [filterValidated, setFilterValidated] = useState<'all' | 'pending' | 'validated'>('all');
+    const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'classified'>('all');
     const [isRefreshing, startTransition] = useTransition();
     const [logoutLoading, setLogoutLoading] = useState(false);
 
-    // Realtime subscription — actualiza UI cuando llegan nuevos registros o
-    // se modifican los existentes. NO bloquea el render inicial.
+    // Realtime: actualiza UI cuando llegan nuevos registros o se modifican.
     useEffect(() => {
         const channel = supabase
             .channel('clinical_records_dashboard')
@@ -74,11 +117,10 @@ export default function NurseDashboardClient({
                 (payload) => {
                     const newRecord = payload.new as ClinicalRecord;
                     setRecords((prev) => {
-                        // Evita duplicados si el INSERT llega antes que el fetch.
                         if (prev.find((r) => r.id === newRecord.id)) return prev;
                         return [newRecord, ...prev].slice(0, 100);
                     });
-                }
+                },
             )
             .on(
                 'postgres_changes',
@@ -86,9 +128,9 @@ export default function NurseDashboardClient({
                 (payload) => {
                     const updated = payload.new as ClinicalRecord;
                     setRecords((prev) =>
-                        prev.map((r) => (r.id === updated.id ? { ...r, ...updated } : r))
+                        prev.map((r) => (r.id === updated.id ? { ...r, ...updated } : r)),
                     );
-                }
+                },
             )
             .subscribe();
 
@@ -99,23 +141,31 @@ export default function NurseDashboardClient({
 
     const filtered = useMemo(() => {
         return records.filter((r) => {
-            if (filterEsi !== null && r.esi_level !== filterEsi) return false;
-            if (filterValidated === 'pending' && r.nurse_validated) return false;
-            if (filterValidated === 'validated' && !r.nurse_validated) return false;
+            if (filterStatus === 'pending' && r.nurse_validated) return false;
+            if (filterStatus === 'classified' && !r.nurse_validated) return false;
             return true;
         });
-    }, [records, filterEsi, filterValidated]);
+    }, [records, filterStatus]);
 
     const stats = useMemo(() => {
         const total = records.length;
-        const validated = records.filter((r) => r.nurse_validated).length;
-        const pending = total - validated;
-        const byEsi = [1, 2, 3, 4, 5].map((lvl) => records.filter((r) => r.esi_level === lvl).length);
-        return { total, validated, pending, byEsi };
+        const classified = records.filter((r) => r.nurse_validated).length;
+        const pending = total - classified;
+        // Concordancia: casos clasificados donde la enfermera coincidió con la IA.
+        const classifiedRecords = records.filter(
+            (r) => r.nurse_validated && r.nurse_override_level !== null,
+        );
+        const matches = classifiedRecords.filter(
+            (r) => r.nurse_override_level === r.esi_level,
+        ).length;
+        const concordancePct =
+            classifiedRecords.length > 0
+                ? Math.round((matches / classifiedRecords.length) * 100)
+                : null;
+        return { total, classified, pending, concordancePct };
     }, [records]);
 
     async function handleRefresh() {
-        // Refresca el Server Component — usa cookies HTTP, no localStorage.
         startTransition(() => {
             router.refresh();
         });
@@ -127,14 +177,15 @@ export default function NurseDashboardClient({
         window.location.assign('/login/nurse');
     }
 
-    async function handleValidate(recordId: string, nurseEsi: number) {
-        // Optimistic update
+    async function handleClassify(recordId: string, nurseEsi: number) {
+        // Optimistic update — marca el caso como clasificado por enfermería
+        // y guarda su nivel ESI INDEPENDIENTE del de la IA.
         setRecords((prev) =>
             prev.map((r) =>
                 r.id === recordId
                     ? { ...r, nurse_validated: true, nurse_override_level: nurseEsi }
-                    : r
-            )
+                    : r,
+            ),
         );
 
         const { error: updateError } = await supabase
@@ -148,10 +199,10 @@ export default function NurseDashboardClient({
                 prev.map((r) =>
                     r.id === recordId
                         ? { ...r, nurse_validated: false, nurse_override_level: null }
-                        : r
-                )
+                        : r,
+                ),
             );
-            alert(`Error al validar: ${updateError.message}`);
+            alert(`Error al guardar la clasificación: ${updateError.message}`);
         }
     }
 
@@ -200,6 +251,18 @@ export default function NurseDashboardClient({
                     </div>
                 )}
 
+                {/* Aviso metodológico — recuerda al usuario el principio del panel */}
+                <div className="bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3 mb-6 flex items-start gap-3">
+                    <svg className="w-5 h-5 text-indigo-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <p className="text-sm text-indigo-900 leading-snug">
+                        <span className="font-semibold">Evaluación independiente:</span> clasifique cada caso según
+                        su criterio clínico. La categoría ESI propuesta por la IA permanece oculta hasta que
+                        usted asigne la suya, para garantizar la independencia metodológica del estudio.
+                    </p>
+                </div>
+
                 {/* Stats */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                     <div className="bg-white rounded-xl border border-gray-200 p-4">
@@ -207,71 +270,59 @@ export default function NurseDashboardClient({
                         <p className="text-3xl font-bold text-gray-900">{stats.total}</p>
                     </div>
                     <div className="bg-white rounded-xl border border-gray-200 p-4">
-                        <p className="text-xs text-gray-500 uppercase font-medium">Pendientes</p>
+                        <p className="text-xs text-gray-500 uppercase font-medium">Por clasificar</p>
                         <p className="text-3xl font-bold text-amber-600">{stats.pending}</p>
                     </div>
                     <div className="bg-white rounded-xl border border-gray-200 p-4">
-                        <p className="text-xs text-gray-500 uppercase font-medium">Validados</p>
-                        <p className="text-3xl font-bold text-emerald-600">{stats.validated}</p>
+                        <p className="text-xs text-gray-500 uppercase font-medium">Clasificados</p>
+                        <p className="text-3xl font-bold text-emerald-600">{stats.classified}</p>
                     </div>
                     <div className="bg-white rounded-xl border border-gray-200 p-4">
-                        <p className="text-xs text-gray-500 uppercase font-medium">ESI 1 + 2</p>
-                        <p className="text-3xl font-bold text-red-600">{stats.byEsi[0] + stats.byEsi[1]}</p>
+                        <p className="text-xs text-gray-500 uppercase font-medium">Concordancia IA</p>
+                        <p className="text-3xl font-bold text-indigo-600">
+                            {stats.concordancePct === null ? '—' : `${stats.concordancePct}%`}
+                        </p>
                     </div>
                 </div>
 
-                {/* Filters */}
+                {/* Filtros — solo por estado, no por ESI (no se conoce hasta clasificar) */}
                 <div className="bg-white rounded-xl border border-gray-200 p-4 mb-4">
-                    <div className="flex flex-wrap items-center gap-3">
-                        <div className="flex items-center gap-1">
-                            <span className="text-sm font-medium text-gray-700 mr-2">ESI:</span>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-medium text-gray-700 mr-2">Estado:</span>
+                        {([
+                            ['all', 'Todos'],
+                            ['pending', 'Por clasificar'],
+                            ['classified', 'Clasificados'],
+                        ] as const).map(([val, lbl]) => (
                             <button
-                                onClick={() => setFilterEsi(null)}
-                                className={`px-3 py-1 text-sm rounded-md transition-colors ${filterEsi === null ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                                key={val}
+                                onClick={() => setFilterStatus(val)}
+                                className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                                    filterStatus === val
+                                        ? 'bg-emerald-600 text-white'
+                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                }`}
                             >
-                                Todos
+                                {lbl}
                             </button>
-                            {[1, 2, 3, 4, 5].map((lvl) => (
-                                <button
-                                    key={lvl}
-                                    onClick={() => setFilterEsi(filterEsi === lvl ? null : lvl)}
-                                    className={`px-3 py-1 text-sm rounded-md transition-colors ${filterEsi === lvl ? `${esiColors[lvl].bg} ${esiColors[lvl].text} font-semibold` : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
-                                >
-                                    {lvl}
-                                </button>
-                            ))}
-                        </div>
-                        <div className="flex items-center gap-1 ml-auto">
-                            <span className="text-sm font-medium text-gray-700 mr-2">Estado:</span>
-                            {([
-                                ['all', 'Todos'],
-                                ['pending', 'Pendientes'],
-                                ['validated', 'Validados'],
-                            ] as const).map(([val, lbl]) => (
-                                <button
-                                    key={val}
-                                    onClick={() => setFilterValidated(val)}
-                                    className={`px-3 py-1 text-sm rounded-md transition-colors ${filterValidated === val ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
-                                >
-                                    {lbl}
-                                </button>
-                            ))}
-                        </div>
+                        ))}
                     </div>
                 </div>
 
-                {/* Records list */}
+                {/* Lista de registros */}
                 {filtered.length === 0 ? (
                     <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
                         <svg className="w-16 h-16 text-gray-300 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                         </svg>
-                        <p className="text-gray-500">No hay registros clínicos {records.length > 0 ? 'con los filtros actuales' : 'aún'}.</p>
+                        <p className="text-gray-500">
+                            No hay registros clínicos {records.length > 0 ? 'con los filtros actuales' : 'aún'}.
+                        </p>
                     </div>
                 ) : (
                     <div className="space-y-3">
                         {filtered.map((record) => (
-                            <RecordCard key={record.id} record={record} onValidate={handleValidate} />
+                            <RecordCard key={record.id} record={record} onClassify={handleClassify} />
                         ))}
                     </div>
                 )}
@@ -282,47 +333,97 @@ export default function NurseDashboardClient({
 
 function RecordCard({
     record,
-    onValidate,
+    onClassify,
 }: {
     record: ClinicalRecord;
-    onValidate: (id: string, esi: number) => void;
+    onClassify: (id: string, esi: number) => void;
 }) {
     const [expanded, setExpanded] = useState(false);
-    const [overrideEsi, setOverrideEsi] = useState<number>(record.nurse_override_level ?? record.esi_level);
-    const esi = esiColors[record.esi_level] ?? esiColors[3];
+    const [selectedEsi, setSelectedEsi] = useState<number | null>(null);
 
+    const classified = record.nurse_validated && record.nurse_override_level !== null;
+    const aiEsi = record.esi_level;
+    const nurseEsi = record.nurse_override_level;
+    const concordant = classified && nurseEsi === aiEsi;
+
+    // La tarjeta NO muestra el ESI de la IA mientras no se haya clasificado.
+    // Cuando está clasificada, muestra ambos lado a lado.
     return (
-        <div className={`bg-white rounded-xl border ${esi.border} overflow-hidden`}>
+        <div
+            className={`bg-white rounded-xl border overflow-hidden ${
+                classified
+                    ? concordant
+                        ? 'border-emerald-200'
+                        : 'border-amber-300'
+                    : 'border-gray-200'
+            }`}
+        >
             <div className="p-4">
                 <div className="flex items-start justify-between gap-4">
                     <div className="flex items-start gap-3 flex-1 min-w-0">
-                        <div className={`w-12 h-12 ${esi.bg} ${esi.text} rounded-lg flex items-center justify-center font-bold text-lg flex-shrink-0`}>
-                            ESI {record.esi_level}
-                        </div>
+                        {/* Avatar genérico — sin badge ESI hasta clasificar */}
+                        {!classified ? (
+                            <div className="w-12 h-12 bg-gray-100 text-gray-500 rounded-lg flex items-center justify-center flex-shrink-0">
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                                </svg>
+                            </div>
+                        ) : (
+                            <div
+                                className={`w-12 h-12 ${esiColors[nurseEsi!].bg} ${esiColors[nurseEsi!].text} rounded-lg flex items-center justify-center font-bold text-lg flex-shrink-0`}
+                            >
+                                ESI {nurseEsi}
+                            </div>
+                        )}
+
                         <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
                                 <span className="font-semibold text-gray-900">
                                     {record.anonymous_code || record.id.slice(0, 8)}
                                 </span>
-                                <span className={`text-xs px-2 py-0.5 rounded-full ${esi.bg} ${esi.text} font-medium`}>
-                                    {esi.label}
-                                </span>
-                                {record.nurse_validated && (
-                                    <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium flex items-center gap-1">
-                                        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                                        </svg>
-                                        Validado
+                                {!classified && (
+                                    <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-medium">
+                                        Por clasificar
                                     </span>
                                 )}
+                                {classified && (
+                                    <>
+                                        <span
+                                            className={`text-xs px-2 py-0.5 rounded-full ${esiColors[nurseEsi!].bg} ${esiColors[nurseEsi!].text} font-medium`}
+                                        >
+                                            Enfermera: ESI {nurseEsi}
+                                        </span>
+                                        <span
+                                            className={`text-xs px-2 py-0.5 rounded-full ${esiColors[aiEsi].bg} ${esiColors[aiEsi].text} font-medium`}
+                                        >
+                                            IA: ESI {aiEsi}
+                                        </span>
+                                        {concordant ? (
+                                            <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium flex items-center gap-1">
+                                                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                                </svg>
+                                                Concordancia
+                                            </span>
+                                        ) : (
+                                            <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-medium">
+                                                Discrepancia
+                                            </span>
+                                        )}
+                                    </>
+                                )}
                             </div>
-                            <p className="text-sm text-gray-600 mt-1 line-clamp-2">
+                            <p className="text-sm text-gray-700 mt-1 line-clamp-2">
                                 {record.symptoms_text || 'Sin síntomas registrados'}
                             </p>
-                            <div className="flex items-center gap-3 mt-2 text-xs text-gray-500">
+                            <div className="flex items-center gap-3 mt-2 text-xs text-gray-500 flex-wrap">
                                 <span>{formatDate(record.created_at)}</span>
-                                {record.patient_gender && <span>· {record.patient_gender}</span>}
-                                {record.patient_age_group && <span>· {record.patient_age_group}</span>}
+                                {genderText(record.patient_gender) && (
+                                    <span>· {genderText(record.patient_gender)}</span>
+                                )}
+                                {ageGroupText(record.patient_age_group) && (
+                                    <span>· {ageGroupText(record.patient_age_group)}</span>
+                                )}
                             </div>
                         </div>
                     </div>
@@ -330,59 +431,147 @@ function RecordCard({
                         onClick={() => setExpanded((v) => !v)}
                         className="text-sm text-emerald-600 hover:text-emerald-700 font-medium flex-shrink-0"
                     >
-                        {expanded ? 'Ocultar' : 'Ver detalle'}
+                        {expanded ? 'Ocultar' : classified ? 'Ver detalle' : 'Clasificar'}
                     </button>
                 </div>
 
                 {expanded && (
                     <div className="mt-4 pt-4 border-t border-gray-100 space-y-4">
-                        {/* AI response */}
-                        {record.ai_response ? (
-                            <div>
-                                <h3 className="text-xs font-semibold text-gray-700 uppercase mb-2">Análisis IA</h3>
-                                <pre className="bg-gray-50 rounded-lg p-3 text-xs text-gray-700 overflow-x-auto whitespace-pre-wrap">
-                                    {JSON.stringify(record.ai_response, null, 2)}
-                                </pre>
+                        {/* Relato del paciente — siempre visible */}
+                        <div>
+                            <h3 className="text-xs font-semibold text-gray-700 uppercase mb-2">
+                                Relato del paciente
+                            </h3>
+                            <div className="bg-gray-50 rounded-lg p-3 text-sm text-gray-800 whitespace-pre-wrap">
+                                {record.symptoms_text || 'Sin descripción de síntomas.'}
                             </div>
-                        ) : null}
+                        </div>
 
-                        {/* Validación de enfermera */}
-                        {!record.nurse_validated && (
-                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-                                <h3 className="text-sm font-semibold text-amber-900 mb-2">Validación de enfermería</h3>
-                                <p className="text-xs text-amber-700 mb-3">
-                                    Confirma o ajusta el nivel ESI asignado por la IA.
+                        {/* Demografía */}
+                        <div className="flex flex-wrap gap-4 text-sm">
+                            <div>
+                                <span className="text-xs text-gray-500 uppercase font-medium block">
+                                    Sexo
+                                </span>
+                                <span className="text-gray-900">
+                                    {genderText(record.patient_gender) || 'No declarado'}
+                                </span>
+                            </div>
+                            <div>
+                                <span className="text-xs text-gray-500 uppercase font-medium block">
+                                    Grupo etario
+                                </span>
+                                <span className="text-gray-900">
+                                    {ageGroupText(record.patient_age_group) || 'No declarado'}
+                                </span>
+                            </div>
+                            <div>
+                                <span className="text-xs text-gray-500 uppercase font-medium block">
+                                    Fecha de ingreso
+                                </span>
+                                <span className="text-gray-900">{formatDate(record.created_at)}</span>
+                            </div>
+                        </div>
+
+                        {/* Si NO está clasificado — flujo de clasificación ciega */}
+                        {!classified && (
+                            <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
+                                <h3 className="text-sm font-semibold text-indigo-900 mb-1">
+                                    Su clasificación ESI
+                                </h3>
+                                <p className="text-xs text-indigo-700 mb-3">
+                                    Asigne el nivel ESI según su criterio clínico. La categoría propuesta
+                                    por la IA se revelará después de su clasificación.
                                 </p>
                                 <div className="flex items-center gap-2 flex-wrap">
-                                    <span className="text-sm text-gray-700">Tu clasificación ESI:</span>
                                     {[1, 2, 3, 4, 5].map((lvl) => (
                                         <button
                                             key={lvl}
-                                            onClick={() => setOverrideEsi(lvl)}
-                                            className={`w-9 h-9 rounded-md font-bold transition-colors ${overrideEsi === lvl ? `${esiColors[lvl].bg} ${esiColors[lvl].text} ring-2 ring-offset-1 ring-emerald-500` : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                                            onClick={() => setSelectedEsi(lvl)}
+                                            className={`w-12 h-12 rounded-md font-bold text-lg transition-colors ${
+                                                selectedEsi === lvl
+                                                    ? `${esiColors[lvl].bg} ${esiColors[lvl].text} ring-2 ring-offset-1 ring-indigo-500`
+                                                    : 'bg-white border border-gray-200 text-gray-700 hover:bg-gray-50'
+                                            }`}
+                                            aria-label={`ESI ${lvl} — ${esiColors[lvl].label}`}
                                         >
                                             {lvl}
                                         </button>
                                     ))}
                                     <button
-                                        onClick={() => onValidate(record.id, overrideEsi)}
-                                        className="ml-auto px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold rounded-md transition-colors"
+                                        onClick={() => {
+                                            if (selectedEsi !== null) {
+                                                onClassify(record.id, selectedEsi);
+                                            }
+                                        }}
+                                        disabled={selectedEsi === null}
+                                        className="ml-auto px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                                     >
-                                        Validar
+                                        Clasificar
                                     </button>
                                 </div>
+                                {selectedEsi !== null && (
+                                    <p className="text-xs text-indigo-800 mt-3">
+                                        Seleccionado:{' '}
+                                        <span className="font-semibold">
+                                            ESI {selectedEsi} — {esiColors[selectedEsi].label}
+                                        </span>
+                                    </p>
+                                )}
                             </div>
                         )}
 
-                        {record.nurse_validated && record.nurse_override_level !== null && (
-                            <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 text-sm">
-                                <span className="font-medium text-emerald-900">Validado por enfermería: </span>
-                                <span className="text-emerald-700">ESI {record.nurse_override_level}</span>
-                                {record.nurse_override_level !== record.esi_level && (
-                                    <span className="text-amber-700 ml-2">
-                                        (ajustado desde ESI {record.esi_level})
-                                    </span>
-                                )}
+                        {/* Si YA está clasificado — comparación final */}
+                        {classified && (
+                            <div
+                                className={`rounded-lg p-4 border ${
+                                    concordant
+                                        ? 'bg-emerald-50 border-emerald-200'
+                                        : 'bg-amber-50 border-amber-200'
+                                }`}
+                            >
+                                <h3
+                                    className={`text-sm font-semibold mb-3 ${
+                                        concordant ? 'text-emerald-900' : 'text-amber-900'
+                                    }`}
+                                >
+                                    Resultado de la evaluación
+                                </h3>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div className="bg-white rounded-md p-3 border border-gray-200">
+                                        <p className="text-xs text-gray-500 uppercase font-medium mb-1">
+                                            Su clasificación
+                                        </p>
+                                        <p
+                                            className={`text-lg font-bold ${esiColors[nurseEsi!].text}`}
+                                        >
+                                            ESI {nurseEsi}
+                                        </p>
+                                        <p className="text-xs text-gray-600">
+                                            {esiColors[nurseEsi!].label}
+                                        </p>
+                                    </div>
+                                    <div className="bg-white rounded-md p-3 border border-gray-200">
+                                        <p className="text-xs text-gray-500 uppercase font-medium mb-1">
+                                            Clasificación IA
+                                        </p>
+                                        <p className={`text-lg font-bold ${esiColors[aiEsi].text}`}>
+                                            ESI {aiEsi}
+                                        </p>
+                                        <p className="text-xs text-gray-600">
+                                            {esiColors[aiEsi].label}
+                                        </p>
+                                    </div>
+                                </div>
+                                <p
+                                    className={`text-xs mt-3 ${
+                                        concordant ? 'text-emerald-700' : 'text-amber-700'
+                                    }`}
+                                >
+                                    {concordant
+                                        ? 'Ambas evaluaciones coinciden.'
+                                        : 'Las evaluaciones difieren — registro disponible para análisis de concordancia.'}
+                                </p>
                             </div>
                         )}
                     </div>
