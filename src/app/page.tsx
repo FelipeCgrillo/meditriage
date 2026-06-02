@@ -3,289 +3,278 @@
 import Link from 'next/link';
 
 /**
- * Landing page — rediseño editorial.
- *
- * Filosofía: este es un proyecto de investigación clínica en la Universidad
- * de Chile, no un producto SaaS genérico. La paleta original (azul oscuro
- * saturado, gradientes cian-esmeralda, glows, glassmorphism, íconos SVG
- * decorativos, pulsos animados) se asociaba a estética genérica de IA y no
- * comunicaba seriedad institucional ni rigor metodológico.
- *
- * Esta versión adopta una dirección editorial inspirada en publicaciones
- * académicas y revistas clínicas: papel marfil, tipografía serif para
- * el display, jerarquía clara, un único color de acento (Hydra Teal), nada
- * de íconos, nada de gradientes, nada de animaciones decorativas. Las
- * transiciones son únicamente funcionales (hover de enlaces y botones).
+ * Landing page — visual design restored from commit 36d8da4
+ * (pre-restructure). Route targets are adapted to the current
+ * src/ layout: /paciente (chat) and /login/nurse (nurse login),
+ * since the old /nurse index route was retired during the
+ * authentication overhaul.
  */
-const sty = {
-    body: 'font-[\'Inter\',sans-serif]',
-    display: "font-['Instrument_Serif',serif]",
-};
-
 export default function LandingPage() {
     return (
-        <div className={`min-h-screen bg-[#F7F6F2] text-[#28251D] ${sty.body} selection:bg-[#01696F]/15`}>
-            {/* ─── Topbar institucional ─── */}
-            <header className="border-b border-[#D4D1CA]">
-                <div className="max-w-6xl mx-auto px-6 lg:px-10 py-5 flex items-center justify-between">
-                    <Link href="/" className="flex items-baseline gap-3">
-                        <span className={`${sty.display} text-2xl tracking-tight text-[#28251D]`}>MediTriage</span>
-                        <span className="hidden sm:inline text-xs uppercase tracking-[0.18em] text-[#7A7974]">
-                            Tesis · Universidad de Chile
-                        </span>
-                    </Link>
-                    <nav className="hidden md:flex items-center gap-8 text-sm">
-                        <a href="#metodo" className="text-[#28251D] hover:text-[#01696F] transition-colors">
-                            Método
-                        </a>
-                        <a href="#estudio" className="text-[#28251D] hover:text-[#01696F] transition-colors">
-                            Estudio
-                        </a>
-                        <Link href="/propuesta-piloto" className="text-[#28251D] hover:text-[#01696F] transition-colors">
-                            Piloto CESFAM
-                        </Link>
-                        <Link
-                            href="/login/resultados"
-                            className="text-[#01696F] hover:text-[#0C4E54] underline underline-offset-4 decoration-[#01696F]/40 hover:decoration-[#01696F] transition-colors"
-                        >
-                            Panel investigador
-                        </Link>
-                    </nav>
+        <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900">
+            {/* Hero Section */}
+            <header className="relative overflow-hidden">
+                {/* Animated background elements */}
+                <div className="absolute inset-0 overflow-hidden">
+                    <div className="absolute -top-40 -right-40 w-80 h-80 bg-blue-500/20 rounded-full blur-3xl animate-pulse" />
+                    <div className="absolute top-60 -left-40 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl animate-pulse delay-1000" />
                 </div>
-            </header>
 
-            {/* ─── Hero editorial ─── */}
-            <section className="border-b border-[#D4D1CA]">
-                <div className="max-w-6xl mx-auto px-6 lg:px-10 pt-20 pb-24 lg:pt-28 lg:pb-32 grid lg:grid-cols-12 gap-10">
-                    <div className="lg:col-span-8">
-                        <p className="text-xs uppercase tracking-[0.22em] text-[#7A7974] mb-8">
-                            Investigación clínica · Magíster en Informática Médica
-                        </p>
-                        <h1
-                            className={`${sty.display} text-5xl md:text-6xl lg:text-7xl leading-[1.05] tracking-tight text-[#28251D]`}
-                        >
-                            Apoyo a la decisión clínica en triage de urgencia,
-                            <span className="italic"> evaluado con el rigor</span> de un
-                            estudio piloto.
+                <nav className="relative z-10 container mx-auto px-6 py-6">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 bg-gradient-to-br from-blue-400 to-emerald-400 rounded-xl flex items-center justify-center">
+                                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                                </svg>
+                            </div>
+                            <span className="text-2xl font-bold text-white">MediTriage</span>
+                        </div>
+                        <div className="hidden md:flex items-center gap-6 text-gray-300">
+                            <a href="#como-funciona" className="hover:text-white transition-colors">Cómo Funciona</a>
+                            <a href="#beneficios" className="hover:text-white transition-colors">Beneficios</a>
+                            <Link href="/propuesta-piloto" className="hover:text-white transition-colors flex items-center gap-1">
+                                <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
+                                Piloto CESFAM
+                            </Link>
+                            <Link href="/resultados" className="hover:text-white transition-colors flex items-center gap-1">
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                                </svg>
+                                Resultados
+                            </Link>
+                        </div>
+                    </div>
+                </nav>
+
+                <div className="relative z-10 container mx-auto px-6 py-20 md:py-32">
+                    <div className="max-w-4xl mx-auto text-center">
+                        <div className="inline-flex items-center gap-2 bg-blue-500/20 border border-blue-400/30 rounded-full px-4 py-2 mb-6">
+                            <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
+                            <span className="text-blue-200 text-sm font-medium">Sistema de Triage Inteligente</span>
+                        </div>
+
+                        <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold text-white mb-6 leading-tight">
+                            Clasificación clínica{' '}
+                            <span className="bg-gradient-to-r from-blue-400 via-cyan-400 to-emerald-400 bg-clip-text text-transparent">
+                                potenciada por IA
+                            </span>
                         </h1>
-                        <p className="mt-8 text-lg leading-relaxed text-[#28251D]/85 max-w-2xl">
-                            MediTriage clasifica consultas de urgencia según el Índice de Severidad de
-                            Emergencia (ESI). El sistema entrega su propuesta a la enfermera profesional,
-                            quien valida o ajusta la categoría. El acuerdo entre ambas decisiones se evalúa
-                            con el coeficiente Kappa de Cohen ponderado.
+
+                        <p className="text-lg md:text-xl text-gray-300 mb-10 max-w-2xl mx-auto leading-relaxed">
+                            MediTriage utiliza inteligencia artificial avanzada para clasificar pacientes
+                            según el Índice de Severidad de Emergencia (ESI), optimizando tiempos de
+                            atención y mejorando la eficiencia clínica.
                         </p>
 
-                        <div className="mt-12 flex flex-wrap items-center gap-x-8 gap-y-4">
+                        <div className="flex flex-col sm:flex-row gap-4 justify-center">
                             <Link
                                 href="/paciente"
-                                className="inline-flex items-center gap-3 bg-[#01696F] hover:bg-[#0C4E54] text-white text-sm font-medium px-6 py-3.5 rounded-sm transition-colors"
+                                className="group relative inline-flex items-center justify-center gap-3 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-semibold px-8 py-4 rounded-2xl transition-all duration-300 shadow-lg shadow-blue-500/30 hover:shadow-blue-500/50 hover:scale-105"
                             >
-                                Acceso del paciente
-                                <span aria-hidden="true" className="text-base leading-none">›</span>
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                </svg>
+                                Soy Paciente
+                                <svg className="w-5 h-5 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                                </svg>
                             </Link>
+
                             <Link
                                 href="/login/nurse"
-                                className="inline-flex items-center gap-3 text-sm font-medium text-[#28251D] hover:text-[#01696F] underline underline-offset-4 decoration-[#28251D]/30 hover:decoration-[#01696F] transition-colors"
+                                className="group relative inline-flex items-center justify-center gap-3 bg-white/10 hover:bg-white/20 backdrop-blur-sm border border-white/20 text-white font-semibold px-8 py-4 rounded-2xl transition-all duration-300 hover:scale-105"
                             >
-                                Acceso de enfermería
-                                <span aria-hidden="true" className="text-base leading-none">›</span>
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                                </svg>
+                                Soy Enfermera
+                                <svg className="w-5 h-5 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                                </svg>
                             </Link>
                         </div>
                     </div>
-
-                    {/* Bloque lateral: cita corta */}
-                    <aside className="lg:col-span-4 lg:border-l lg:border-[#D4D1CA] lg:pl-10 flex items-center">
-                        <blockquote className="text-[#28251D]/80">
-                            <p className={`${sty.display} text-2xl leading-snug italic`}>
-                                «El objetivo no es reemplazar el juicio clínico, sino documentarlo, hacerlo
-                                comparable y abrir la decisión a auditoría.»
-                            </p>
-                            <footer className="mt-5 text-xs uppercase tracking-[0.18em] text-[#7A7974]">
-                                Marco de la investigación
-                            </footer>
-                        </blockquote>
-                    </aside>
                 </div>
-            </section>
 
-            {/* ─── Método (numerado, editorial, sin íconos) ─── */}
-            <section id="metodo" className="border-b border-[#D4D1CA]">
-                <div className="max-w-6xl mx-auto px-6 lg:px-10 py-20 lg:py-24">
-                    <div className="grid lg:grid-cols-12 gap-10 mb-14">
-                        <div className="lg:col-span-4">
-                            <p className="text-xs uppercase tracking-[0.22em] text-[#7A7974] mb-4">Método</p>
-                            <h2 className={`${sty.display} text-4xl lg:text-5xl leading-[1.1] tracking-tight`}>
-                                Tres pasos para una decisión documentada.
-                            </h2>
-                        </div>
-                        <p className="lg:col-span-7 lg:col-start-6 text-[#28251D]/75 text-base leading-relaxed">
-                            El flujo está diseñado para preservar la responsabilidad clínica: el sistema
-                            propone, el profesional valida. Cada interacción queda registrada como recurso
-                            FHIR R4 y es trazable para auditoría posterior.
+                {/* Gradient divider */}
+                <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-slate-900 to-transparent" />
+            </header>
+
+            {/* How it Works Section */}
+            <section id="como-funciona" className="relative py-24 bg-slate-900">
+                <div className="container mx-auto px-6">
+                    <div className="text-center mb-16">
+                        <h2 className="text-3xl md:text-4xl font-bold text-white mb-4">
+                            ¿Cómo Funciona?
+                        </h2>
+                        <p className="text-gray-400 max-w-2xl mx-auto">
+                            Un proceso simple y eficiente para clasificar pacientes utilizando IA
                         </p>
                     </div>
 
-                    <ol className="grid md:grid-cols-3 gap-0 border-t border-[#D4D1CA]">
-                        {[
-                            {
-                                n: '01',
-                                titulo: 'Relato del paciente',
-                                texto: 'La persona describe síntomas, duración y antecedentes en lenguaje natural. No se pregunta nombre ni RUT en esta etapa.',
-                            },
-                            {
-                                n: '02',
-                                titulo: 'Propuesta del sistema',
-                                texto: 'El modelo clasifica la consulta en uno de los cinco niveles ESI y expone su razonamiento, los recursos previstos y las banderas rojas detectadas.',
-                            },
-                            {
-                                n: '03',
-                                titulo: 'Validación de enfermería',
-                                texto: 'La enfermera revisa la propuesta a ciegas, ajusta el nivel si corresponde y registra la decisión final. Esta es la categoría que rige la atención.',
-                            },
-                        ].map((paso) => (
-                            <li
-                                key={paso.n}
-                                className="border-b border-[#D4D1CA] md:border-b-0 md:border-r last:md:border-r-0 py-10 md:py-12 md:px-8 first:md:pl-0 last:md:pr-0"
-                            >
-                                <div className={`${sty.display} text-5xl text-[#01696F] mb-6`}>{paso.n}</div>
-                                <h3 className="text-lg font-semibold text-[#28251D] mb-3">{paso.titulo}</h3>
-                                <p className="text-[#28251D]/75 leading-relaxed text-[15px]">{paso.texto}</p>
-                            </li>
-                        ))}
-                    </ol>
-                </div>
-            </section>
-
-            {/* ─── Cifras del estudio (sobrias, tipográficas) ─── */}
-            <section id="estudio" className="border-b border-[#D4D1CA]">
-                <div className="max-w-6xl mx-auto px-6 lg:px-10 py-20 lg:py-24">
-                    <div className="grid lg:grid-cols-12 gap-10 mb-12">
-                        <div className="lg:col-span-5">
-                            <p className="text-xs uppercase tracking-[0.22em] text-[#7A7974] mb-4">
-                                Estudio piloto
-                            </p>
-                            <h2 className={`${sty.display} text-4xl lg:text-5xl leading-[1.1] tracking-tight`}>
-                                Una hipótesis, dos vías de evidencia.
-                            </h2>
-                        </div>
-                        <p className="lg:col-span-6 lg:col-start-7 text-[#28251D]/75 text-base leading-relaxed">
-                            El protocolo contempla un diseño prospectivo en vivo y un diseño retrospectivo
-                            sobre Datos de Atención de Urgencia (DAU). Ambos comparten hipótesis (κ ≥ 0,85),
-                            tamaño muestral y aparato estadístico; la elección operativa depende de la
-                            autorización del Comité Ético Científico.
-                        </p>
-                    </div>
-
-                    <dl className="grid grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-10 border-t border-[#D4D1CA] pt-10">
-                        {[
-                            { k: '230–300', l: 'Pacientes estimados', sub: 'fórmula de Donner, α 0,05' },
-                            { k: '5', l: 'Niveles ESI', sub: 'estándar v4 de referencia' },
-                            { k: '≥ 0,85', l: 'Kappa esperado', sub: 'acuerdo casi perfecto' },
-                            { k: 'FHIR R4', l: 'Recursos clínicos', sub: '100% conformidad HL7' },
-                        ].map((item) => (
-                            <div key={item.l}>
-                                <dt className={`${sty.display} text-5xl lg:text-6xl text-[#28251D] leading-none mb-3 tabular-nums`}>
-                                    {item.k}
-                                </dt>
-                                <dd className="text-sm text-[#28251D] font-medium">{item.l}</dd>
-                                <dd className="text-xs text-[#7A7974] mt-1">{item.sub}</dd>
+                    <div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">
+                        <div className="group relative bg-gradient-to-br from-slate-800/50 to-slate-900/50 border border-slate-700/50 rounded-3xl p-8 hover:border-blue-500/50 transition-all duration-300">
+                            <div className="absolute -top-4 -left-4 w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl flex items-center justify-center text-white font-bold text-xl shadow-lg shadow-blue-500/30">
+                                1
                             </div>
-                        ))}
-                    </dl>
-                </div>
-            </section>
-
-            {/* ─── Cierre / accesos secundarios ─── */}
-            <section>
-                <div className="max-w-6xl mx-auto px-6 lg:px-10 py-20 lg:py-24">
-                    <div className="grid lg:grid-cols-12 gap-10">
-                        <div className="lg:col-span-7">
-                            <p className="text-xs uppercase tracking-[0.22em] text-[#7A7974] mb-4">Accesos</p>
-                            <h2 className={`${sty.display} text-4xl lg:text-5xl leading-[1.1] tracking-tight mb-6`}>
-                                Selecciona tu rol para continuar.
-                            </h2>
-                            <p className="text-[#28251D]/75 max-w-xl leading-relaxed">
-                                El acceso de enfermería y el panel del investigador requieren credenciales
-                                emitidas para el estudio. El flujo del paciente es público y anonimizado.
-                            </p>
+                            <div className="mt-4">
+                                <div className="w-14 h-14 bg-blue-500/10 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+                                    <svg className="w-7 h-7 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                    </svg>
+                                </div>
+                                <h3 className="text-xl font-semibold text-white mb-3">Describe tus síntomas</h3>
+                                <p className="text-gray-400 leading-relaxed">
+                                    El paciente ingresa sus síntomas de forma natural, describiendo qué siente y desde cuándo.
+                                </p>
+                            </div>
                         </div>
 
-                        <ul className="lg:col-span-5 divide-y divide-[#D4D1CA] border-t border-b border-[#D4D1CA]">
-                            <li>
-                                <Link
-                                    href="/paciente"
-                                    className="group flex items-baseline justify-between py-5 hover:text-[#01696F] transition-colors"
-                                >
-                                    <span className="flex items-baseline gap-4">
-                                        <span className="text-xs tabular-nums text-[#7A7974] group-hover:text-[#01696F]">
-                                            01
-                                        </span>
-                                        <span className="text-base font-medium">Iniciar consulta como paciente</span>
-                                    </span>
-                                    <span aria-hidden="true" className="text-lg leading-none">→</span>
-                                </Link>
-                            </li>
-                            <li>
-                                <Link
-                                    href="/login/nurse"
-                                    className="group flex items-baseline justify-between py-5 hover:text-[#01696F] transition-colors"
-                                >
-                                    <span className="flex items-baseline gap-4">
-                                        <span className="text-xs tabular-nums text-[#7A7974] group-hover:text-[#01696F]">
-                                            02
-                                        </span>
-                                        <span className="text-base font-medium">Ingresar como enfermería</span>
-                                    </span>
-                                    <span aria-hidden="true" className="text-lg leading-none">→</span>
-                                </Link>
-                            </li>
-                            <li>
-                                <Link
-                                    href="/login/resultados"
-                                    className="group flex items-baseline justify-between py-5 hover:text-[#01696F] transition-colors"
-                                >
-                                    <span className="flex items-baseline gap-4">
-                                        <span className="text-xs tabular-nums text-[#7A7974] group-hover:text-[#01696F]">
-                                            03
-                                        </span>
-                                        <span className="text-base font-medium">Panel del investigador</span>
-                                    </span>
-                                    <span aria-hidden="true" className="text-lg leading-none">→</span>
-                                </Link>
-                            </li>
-                            <li>
-                                <Link
-                                    href="/propuesta-piloto"
-                                    className="group flex items-baseline justify-between py-5 hover:text-[#01696F] transition-colors"
-                                >
-                                    <span className="flex items-baseline gap-4">
-                                        <span className="text-xs tabular-nums text-[#7A7974] group-hover:text-[#01696F]">
-                                            04
-                                        </span>
-                                        <span className="text-base font-medium">Propuesta del piloto CESFAM</span>
-                                    </span>
-                                    <span aria-hidden="true" className="text-lg leading-none">→</span>
-                                </Link>
-                            </li>
-                        </ul>
+                        <div className="group relative bg-gradient-to-br from-slate-800/50 to-slate-900/50 border border-slate-700/50 rounded-3xl p-8 hover:border-cyan-500/50 transition-all duration-300">
+                            <div className="absolute -top-4 -left-4 w-12 h-12 bg-gradient-to-br from-cyan-500 to-cyan-600 rounded-2xl flex items-center justify-center text-white font-bold text-xl shadow-lg shadow-cyan-500/30">
+                                2
+                            </div>
+                            <div className="mt-4">
+                                <div className="w-14 h-14 bg-cyan-500/10 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+                                    <svg className="w-7 h-7 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                                    </svg>
+                                </div>
+                                <h3 className="text-xl font-semibold text-white mb-3">La IA analiza</h3>
+                                <p className="text-gray-400 leading-relaxed">
+                                    Claude analiza los síntomas y asigna un nivel ESI (1-5) con razonamiento clínico detallado.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="group relative bg-gradient-to-br from-slate-800/50 to-slate-900/50 border border-slate-700/50 rounded-3xl p-8 hover:border-emerald-500/50 transition-all duration-300">
+                            <div className="absolute -top-4 -left-4 w-12 h-12 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-2xl flex items-center justify-center text-white font-bold text-xl shadow-lg shadow-emerald-500/30">
+                                3
+                            </div>
+                            <div className="mt-4">
+                                <div className="w-14 h-14 bg-emerald-500/10 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+                                    <svg className="w-7 h-7 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                </div>
+                                <h3 className="text-xl font-semibold text-white mb-3">Enfermera valida</h3>
+                                <p className="text-gray-400 leading-relaxed">
+                                    El personal clínico revisa y valida la clasificación, pudiendo ajustarla si es necesario.
+                                </p>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </section>
 
-            {/* ─── Pie de página ─── */}
-            <footer className="border-t border-[#D4D1CA] bg-[#F9F8F5]">
-                <div className="max-w-6xl mx-auto px-6 lg:px-10 py-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
-                    <div>
-                        <p className={`${sty.display} text-xl text-[#28251D]`}>MediTriage</p>
-                        <p className="text-xs text-[#7A7974] mt-1">
-                            Tesis de Magíster en Informática Médica · Universidad de Chile · 2026
+            {/* Benefits Section */}
+            <section id="beneficios" className="relative py-24 bg-gradient-to-b from-slate-900 to-slate-800">
+                <div className="container mx-auto px-6">
+                    <div className="text-center mb-16">
+                        <h2 className="text-3xl md:text-4xl font-bold text-white mb-4">
+                            Beneficios Clave
+                        </h2>
+                        <p className="text-gray-400 max-w-2xl mx-auto">
+                            Mejora la eficiencia clínica con tecnología de vanguardia
                         </p>
                     </div>
-                    <p className="text-xs text-[#7A7974] md:text-right max-w-sm leading-relaxed">
-                        Sistema de apoyo a la decisión clínica para triage de urgencia. Las clasificaciones
-                        del sistema no constituyen indicación médica y deben ser validadas por personal
-                        clínico habilitado.
-                    </p>
+
+                    <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 max-w-6xl mx-auto">
+                        <div className="bg-gradient-to-br from-blue-500/10 to-blue-600/5 border border-blue-500/20 rounded-2xl p-6 text-center">
+                            <div className="text-4xl font-bold text-blue-400 mb-2">~3s</div>
+                            <div className="text-gray-300 font-medium">Tiempo de Análisis</div>
+                            <div className="text-gray-500 text-sm mt-1">IA en tiempo real</div>
+                        </div>
+
+                        <div className="bg-gradient-to-br from-emerald-500/10 to-emerald-600/5 border border-emerald-500/20 rounded-2xl p-6 text-center">
+                            <div className="text-4xl font-bold text-emerald-400 mb-2">5</div>
+                            <div className="text-gray-300 font-medium">Niveles ESI</div>
+                            <div className="text-gray-500 text-sm mt-1">Clasificación estándar</div>
+                        </div>
+
+                        <div className="bg-gradient-to-br from-purple-500/10 to-purple-600/5 border border-purple-500/20 rounded-2xl p-6 text-center">
+                            <div className="text-4xl font-bold text-purple-400 mb-2">24/7</div>
+                            <div className="text-gray-300 font-medium">Disponibilidad</div>
+                            <div className="text-gray-500 text-sm mt-1">Sin interrupciones</div>
+                        </div>
+
+                        <div className="bg-gradient-to-br from-amber-500/10 to-amber-600/5 border border-amber-500/20 rounded-2xl p-6 text-center">
+                            <div className="text-4xl font-bold text-amber-400 mb-2">100%</div>
+                            <div className="text-gray-300 font-medium">Trazabilidad</div>
+                            <div className="text-gray-500 text-sm mt-1">FHIR compliant</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            {/* CTA Section */}
+            <section className="relative py-24 bg-gradient-to-b from-slate-800 to-slate-900">
+                <div className="container mx-auto px-6">
+                    <div className="max-w-3xl mx-auto text-center">
+                        <h2 className="text-3xl md:text-4xl font-bold text-white mb-6">
+                            Comienza Ahora
+                        </h2>
+                        <p className="text-gray-400 mb-10 text-lg">
+                            Selecciona tu rol para acceder al sistema de triage inteligente
+                        </p>
+
+                        <div className="flex flex-col sm:flex-row gap-4 justify-center flex-wrap">
+                            <Link
+                                href="/paciente"
+                                className="group inline-flex items-center justify-center gap-3 bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white font-semibold px-10 py-5 rounded-2xl transition-all duration-300 shadow-lg shadow-blue-500/30 hover:shadow-blue-500/50 hover:scale-105 text-lg"
+                            >
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                </svg>
+                                Acceder como Paciente
+                            </Link>
+
+                            <Link
+                                href="/login/nurse"
+                                className="group inline-flex items-center justify-center gap-3 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white font-semibold px-10 py-5 rounded-2xl transition-all duration-300 shadow-lg shadow-emerald-500/30 hover:shadow-emerald-500/50 hover:scale-105 text-lg"
+                            >
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                                </svg>
+                                Acceder como Enfermera
+                            </Link>
+
+                            <Link
+                                href="/resultados"
+                                className="group inline-flex items-center justify-center gap-3 bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white font-semibold px-10 py-5 rounded-2xl transition-all duration-300 shadow-lg shadow-indigo-500/30 hover:shadow-indigo-500/50 hover:scale-105 text-lg"
+                            >
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                                </svg>
+                                Panel de Resultados
+                            </Link>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            {/* Footer */}
+            <footer className="bg-slate-900 border-t border-slate-800 py-12">
+                <div className="container mx-auto px-6">
+                    <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+                        <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 bg-gradient-to-br from-blue-400 to-emerald-400 rounded-lg flex items-center justify-center">
+                                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                                </svg>
+                            </div>
+                            <span className="text-lg font-semibold text-white">MediTriage</span>
+                        </div>
+
+                        <div className="text-gray-500 text-sm text-center md:text-left">
+                            Sistema de Auto-Triage con IA para CESFAM
+                        </div>
+
+                        <div className="text-gray-500 text-sm">
+                            Desarrollado por Felipe Carrasco Grillo para Tesis de Magíster en Informática Médica Universidad de Chile • 2025
+                        </div>
+                    </div>
                 </div>
             </footer>
         </div>
