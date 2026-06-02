@@ -29,6 +29,20 @@ export default function ChatInterface() {
     // medical context with contradictory answers later.
     const [answeredOptions, setAnsweredOptions] = useState<Record<string, string>>({});
     const messagesEndRef = useRef<HTMLDivElement>(null);
+    // Keep a ref to the latest messages so the onFinish callback (whose
+    // closure is captured on mount) always reads the current conversation
+    // instead of the empty array from the initial render. This was the
+    // source of the race that forced a hard refresh: onFinish would fire
+    // before React committed the assistant turn, and the persistence path
+    // saved a record with empty symptoms_text or skipped finalization
+    // entirely depending on timing.
+    const messagesRef = useRef<{ role: string; content: string }[]>([]);
+    // Guard against double-firing of the finalization path. useChat may
+    // invoke onFinish more than once in edge cases (provider retries,
+    // strict mode in dev). Without this, we would insert duplicate
+    // clinical_records and overwrite a valid anonymous_code with a new
+    // one, which the UI then fails to surface.
+    const isFinalizingRef = useRef(false);
 
     const {
         messages,
@@ -54,39 +68,80 @@ export default function ChatInterface() {
                 if (json.error || json.status === 'error') return;
 
                 if (json.status === 'success' && json.esi_level) {
+                    // Idempotency guard: only finalize once per conversation.
+                    if (isFinalizingRef.current) {
+                        console.warn('[triage] finalization already in progress; skipping duplicate onFinish');
+                        return;
+                    }
+                    isFinalizingRef.current = true;
+
                     if (json.esi_level <= 2) {
                         setShowEmergencyAlert(true);
                     }
 
+                    // Generate the code synchronously so we can render the
+                    // final screen even if Supabase is slow or fails.
                     const code = generateAnonymousCode();
-                    setAnonymousCode(code);
+
+                    // Read the latest user-authored messages from the ref —
+                    // never from the closure-captured `messages` array,
+                    // which lags behind the actual conversation state.
+                    // Note: only user messages are relevant for symptoms_text;
+                    // the assistant turn that just finished is discarded
+                    // here even if the ref already includes it.
+                    const userMessages = messagesRef.current
+                        .filter((m) => m.role === 'user')
+                        .map((m) => m.content)
+                        .join('\n');
 
                     if (isSupabaseConfigured) {
-                        const { error: dbError } = await supabase
-                            .from('clinical_records')
-                            .insert({
-                                patient_consent: true,
-                                symptoms_text: messages
-                                    .filter((m) => m.role === 'user')
-                                    .map((m) => m.content)
-                                    .join('\n'),
-                                ai_response: json as any,
-                                esi_level: json.esi_level,
-                                nurse_validated: false,
-                                anonymous_code: code,
-                            } as any);
+                        try {
+                            const { error: dbError } = await supabase
+                                .from('clinical_records')
+                                .insert({
+                                    patient_consent: true,
+                                    symptoms_text: userMessages,
+                                    ai_response: json as any,
+                                    esi_level: json.esi_level,
+                                    nurse_validated: false,
+                                    anonymous_code: code,
+                                } as any);
 
-                        if (dbError) console.error('Error saving record:', dbError);
+                            if (dbError) {
+                                console.error('Error saving record:', dbError);
+                                // Do not block the UI — the user still gets
+                                // their code on screen; persistence is best
+                                // effort here.
+                            }
+                        } catch (dbCatch) {
+                            console.error('Unexpected error persisting clinical record:', dbCatch);
+                        }
                     } else {
                         console.warn('[triage] Supabase not configured; skipping clinical record persistence');
                     }
+
+                    // Set the code BEFORE marking finished so the
+                    // (isFinished && anonymousCode) guard cannot land on a
+                    // half-updated render that loops the user back to the
+                    // chat — which is what made a hard refresh look like
+                    // a fix.
+                    setAnonymousCode(code);
                     setIsFinished(true);
                 }
             } catch (e) {
                 console.error('Error parsing AI response:', e);
+                // Release the finalization guard so the user can retry.
+                isFinalizingRef.current = false;
             }
         },
     });
+
+    // Keep messagesRef in sync with the live messages array on every render.
+    // This is the canonical pattern for accessing fresh state inside a
+    // callback whose closure was captured at mount time.
+    useEffect(() => {
+        messagesRef.current = messages.map((m) => ({ role: m.role, content: m.content }));
+    }, [messages]);
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
