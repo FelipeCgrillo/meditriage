@@ -75,15 +75,12 @@ const MIN_INPUT_LENGTH = 3;
 const GENDER_MAP: Record<string, string> = {
     Masculino: 'M',
     Femenino: 'F',
-    Otro: 'Other',
-    'Prefiero no decir': 'Prefer not to say',
 };
 
 const AGE_MAP: Record<string, string | null> = {
-    'Pediátrico (0-17 años)': 'Pediatric',
-    'Adulto (18-64 años)': 'Adult',
-    'Geriátrico (65+ años)': 'Geriatric',
-    'Prefiero no decir': null,
+    '0-17 años': 'Pediatric',
+    '18-64 años': 'Adult',
+    '65+ años': 'Geriatric',
 };
 
 interface TriageChatLegacyProps {
@@ -438,7 +435,7 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
                 pushPre({
                     role: 'assistant',
                     content: 'Para comenzar, indique su género biológico:',
-                    options: ['Masculino', 'Femenino', 'Otro', 'Prefiero no decir'],
+                    options: ['Masculino', 'Femenino'],
                 });
             } else {
                 setDeclined(true);
@@ -453,12 +450,11 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
             setConsentStep('age');
             pushPre({
                 role: 'assistant',
-                content: 'Indique su grupo etario:',
+                content: 'Indique su rango de edad:',
                 options: [
-                    'Pediátrico (0-17 años)',
-                    'Adulto (18-64 años)',
-                    'Geriátrico (65+ años)',
-                    'Prefiero no decir',
+                    '0-17 años',
+                    '18-64 años',
+                    '65+ años',
                 ],
             });
         } else if (consentStep === 'age') {
