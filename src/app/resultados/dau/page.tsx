@@ -2,7 +2,23 @@
 
 import React, { useMemo, useState } from 'react';
 import { parseDAUFile, type DAUParseError } from '@/lib/dau/parser';
+import { summarizeDAU } from '@/lib/dau/summary';
 import type { DAURecord, DAUClassification, DAUSummary, DAUBatchResponse } from '@/lib/dau/types';
+
+/**
+ * Tamaño de cada tanda enviada al servidor. El plan Hobby de Vercel corta las
+ * funciones serverless a ~25 s, y cada registro implica una llamada al LLM. Con
+ * tandas pequeñas cada POST cabe holgado dentro de ese límite; los resultados
+ * se acumulan en el cliente y el resumen (concordancia + matriz de confusión)
+ * se recalcula sobre el TOTAL con la misma función pura del servidor.
+ */
+const BATCH_SIZE = 3;
+
+function chunk<T>(arr: T[], size: number): T[][] {
+    const out: T[][] = [];
+    for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+    return out;
+}
 
 /**
  * Página de análisis retrospectivo de DAU (OE4 Vía B).
@@ -23,6 +39,7 @@ export default function DAUAnalysisPage() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [fileName, setFileName] = useState<string | null>(null);
+    const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
 
     async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
         const file = e.target.files?.[0];
@@ -30,6 +47,7 @@ export default function DAUAnalysisPage() {
         setError(null);
         setResults([]);
         setSummary(null);
+        setProgress(null);
         setFileName(file.name);
         const text = await file.text();
         const parsed = parseDAUFile(text);
@@ -44,21 +62,54 @@ export default function DAUAnalysisPage() {
         if (records.length === 0) return;
         setLoading(true);
         setError(null);
+        setResults([]);
+        setSummary(null);
+
+        const batches = chunk(records, BATCH_SIZE);
+        const accumulated: DAUClassification[] = [];
+        setProgress({ done: 0, total: records.length });
+
         try {
-            const res = await fetch('/api/dau', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ records }),
-            });
-            const data = (await res.json()) as DAUBatchResponse & { error?: string };
-            if (!res.ok) {
-                setError(data.error ?? `Error del servidor (${res.status}).`);
-                return;
+            for (const batch of batches) {
+                let res: Response;
+                try {
+                    res = await fetch('/api/dau', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ records: batch }),
+                    });
+                } catch (netErr) {
+                    throw new Error(`Error de red: ${(netErr as Error).message}`);
+                }
+
+                // Si el servidor responde con algo que no es JSON (p. ej. una
+                // página de error de la plataforma), lo capturamos como texto
+                // para dar un mensaje claro en vez de "Unexpected token".
+                const raw = await res.text();
+                let data: (DAUBatchResponse & { error?: string }) | null = null;
+                try {
+                    data = JSON.parse(raw) as DAUBatchResponse & { error?: string };
+                } catch {
+                    throw new Error(
+                        res.ok
+                            ? 'El servidor devolvió una respuesta no válida.'
+                            : `Error del servidor (${res.status}). El lote pudo exceder el tiempo límite; reduce el tamaño de la tanda.`,
+                    );
+                }
+
+                if (!res.ok || !data) {
+                    throw new Error(data?.error ?? `Error del servidor (${res.status}).`);
+                }
+
+                accumulated.push(...data.results);
+                // Resumen y resultados parciales en vivo, recalculados sobre el
+                // total acumulado con la misma función pura del servidor.
+                setResults([...accumulated]);
+                setSummary(summarizeDAU(accumulated));
+                setProgress({ done: accumulated.length, total: records.length });
             }
-            setResults(data.results);
-            setSummary(data.summary);
         } catch (err) {
-            setError(`Error de red: ${(err as Error).message}`);
+            setError((err as Error).message);
         } finally {
             setLoading(false);
         }
@@ -159,7 +210,11 @@ export default function DAUAnalysisPage() {
                             disabled={records.length === 0 || loading}
                             className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-gray-300 hover:bg-blue-700"
                         >
-                            {loading ? 'Clasificando…' : 'Analizar lote'}
+                            {loading && progress
+                                ? `Clasificando… ${progress.done}/${progress.total}`
+                                : loading
+                                  ? 'Clasificando…'
+                                  : 'Analizar lote'}
                         </button>
                         <button
                             onClick={exportCsv}
@@ -169,6 +224,29 @@ export default function DAUAnalysisPage() {
                             Exportar CSV
                         </button>
                     </div>
+
+                    {/* Barra de progreso del procesamiento por tandas */}
+                    {progress && progress.total > 0 && (
+                        <div className="mt-4">
+                            <div className="mb-1 flex justify-between text-xs text-gray-500">
+                                <span>
+                                    Procesando en tandas de {BATCH_SIZE} (para no exceder el tiempo
+                                    límite del servidor)
+                                </span>
+                                <span>
+                                    {progress.done} / {progress.total}
+                                </span>
+                            </div>
+                            <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
+                                <div
+                                    className="h-full rounded-full bg-blue-600 transition-all duration-300"
+                                    style={{
+                                        width: `${Math.round((progress.done / progress.total) * 100)}%`,
+                                    }}
+                                />
+                            </div>
+                        </div>
+                    )}
                 </section>
 
                 {error && (
