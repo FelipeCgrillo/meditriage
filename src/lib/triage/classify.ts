@@ -68,9 +68,12 @@ Usa estos datos para tus decisiones clínicas. NO los preguntes de nuevo. NO for
  * decisión. Función PURA: misma entrada → misma salida (delegada al motor
  * determinista). No depende de azar, reloj ni red.
  */
-export function applyRuleEngineSafeguard(llmResponse: TriageResponse): TriageResponse {
+export function applyRuleEngineSafeguard(
+    llmResponse: TriageResponse,
+    options: { retrospective?: boolean } = {},
+): TriageResponse {
     const features = (llmResponse.extracted_features ?? {}) as CMDFeatures;
-    const evaluation = evaluateRules(features);
+    const evaluation = evaluateRules(features, { retrospective: options.retrospective });
 
     // Punto de partida: lo que propuso el LLM.
     const merged: TriageResponse = {
@@ -125,6 +128,12 @@ export interface ClassifyFromTextInput {
     gender?: string | null;
     /** Grupo etario: 'Pediatric' | 'Adult' | 'Geriatric'. Contexto, no clínico. */
     ageGroup?: string | null;
+    /**
+     * Modo retrospectivo de un solo turno (Vía B / DAU). Cuando es `true`, los
+     * criterios críticos no referidos se asumen ausentes (negativo presunto) en
+     * vez de forzar `needs_info`. El chat en vivo lo deja en `false` (default).
+     */
+    retrospective?: boolean;
 }
 
 /**
@@ -201,7 +210,7 @@ export async function classifyFromText(input: ClassifyFromTextInput): Promise<Tr
             return { ...(FALLBACK_PAYLOAD as unknown as TriageResponse) };
         }
 
-        return applyRuleEngineSafeguard(parsed.data);
+        return applyRuleEngineSafeguard(parsed.data, { retrospective: input.retrospective });
     } catch (err) {
         const e = err as { name?: string; message?: string; statusCode?: number } | null;
         console.error('[classify] provider/validation error', {

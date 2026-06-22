@@ -48,13 +48,22 @@ export function toClassification(record: DAURecord, response: TriageResponse): D
     };
 }
 
-/** Clasifica un único registro DAU simulando el chat del paciente. */
+/**
+ * Clasifica un único registro DAU simulando el chat del paciente.
+ *
+ * Se pasa `retrospective: true`: el DAU es un estudio de un solo turno, sin
+ * posibilidad de repreguntar. Por eso los criterios críticos no referidos se
+ * asumen ausentes (negativo presunto, convención de auditoría retrospectiva de
+ * fichas) en vez de bloquear con needs_info. Esto NO afecta al chat en vivo,
+ * que clasifica con `retrospective` en su default `false`.
+ */
 export async function classifyRecord(record: DAURecord): Promise<DAUClassification> {
     const response = await classifyFromText({
         chiefComplaint: record.chief_complaint,
         reportedSymptoms: record.reported_symptoms,
         gender: sexToGender(record.sex),
         ageGroup: record.age_group,
+        retrospective: true,
     });
     return toClassification(record, response);
 }
