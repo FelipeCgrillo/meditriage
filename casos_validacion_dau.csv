@@ -1,0 +1,16 @@
+record_id,sexo,edad,motivo_consulta,sintomas_relatados,categoria_esi
+DAU-001,M,68,paro cardiorrespiratorio presenciado,"familiar refiere que dejó de respirar, sin pulso palpable, inconsciente",1
+DAU-002,F,54,dificultad respiratoria severa,"no puede completar frases, labios morados, saturación muy baja según paramédico",1
+DAU-003,M,7,convulsión que no cede,"crisis tónico-clónica de más de 10 minutos, no recupera conciencia entre episodios",1
+DAU-004,M,61,dolor torácico opresivo,Dolor irradiado al brazo izquierdo y mandíbula con sudoración fría y náuseas hace 40 min,2
+DAU-005,F,29,cefalea brusca intensísima,"la peor de mi vida, de aparición súbita, con vómitos y rigidez de nuca",2
+DAU-006,M,45,herida por arma blanca en abdomen,sangrado activo abundante palidez y mareo,2
+DAU-007,F,33,dolor abdominal moderado en fosa iliaca derecha,"náuseas, febrícula y dolor que aumenta al caminar desde anoche",3
+DAU-008,M,72,caída con golpe en la cabeza,"refiere mareo y un episodio de vómito, toma anticoagulantes, sin pérdida de conciencia",3
+DAU-009,F,40,asma con sibilancias,"usó inhalador en casa sin mejoría total, habla con frases entrecortadas pero saturación aceptable",3
+DAU-010,M,26,esguince de tobillo,torcedura jugando futbol hace 2 horas con hinchazón y dolor al apoyar camina con dificultad,4
+DAU-011,F,38,corte superficial en la mano,herida pequeña con un cuchillo de cocina sangrado ya controlado quizas necesite puntos,4
+DAU-012,M,19,dolor de oido,otalgia derecha hace 2 dias sin fiebre alta molestia al masticar,4
+DAU-013,F,31,resfrio comun,congestion nasal y dolor de garganta leve hace tres dias sin fiebre,5
+DAU-014,M,50,receta de medicamento cronico,viene solo a renovar receta de su tratamiento habitual de presion se siente bien,5
+DAU-015,F,24,consulta por resultado de examen,trae resultados de laboratorio para revision sin molestias actuales,5
