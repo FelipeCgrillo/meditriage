@@ -55,6 +55,8 @@ export interface ClinicalRecord {
     consent_eligible?: boolean | null;
     // Conversation history from AI follow-up questions
     conversation_history?: Json | null;
+    // CMD estructurado auto-reportado (migración 009)
+    cmd_features?: Json | null;
 }
 
 /**
@@ -72,6 +74,8 @@ export interface ClinicalRecordInsert {
     nurse_id?: string | null;
     fhir_bundle?: Json | null;
     conversation_history?: Json | null;
+    // CMD estructurado auto-reportado (migración 009)
+    cmd_features?: Json | null;
 }
 
 /**
@@ -119,4 +123,58 @@ export interface FHIRRiskAssessment {
         text: string;
     }>;
     performedDateTime: string;
+}
+
+/**
+ * HL7 FHIR R4 Observation Resource (versión simplificada).
+ *
+ * Representa un hallazgo clínico AUTO-REPORTADO por el paciente (no una
+ * medición instrumentada). Cada Observation lleva una nota "self-reported"
+ * y su código en SNOMED CT (hallazgos) o LOINC (signos referidos).
+ */
+export interface FHIRObservation {
+    resourceType: 'Observation';
+    id: string;
+    // 'preliminary' hasta que la enfermera valide; coherente con RiskAssessment.
+    status: 'preliminary' | 'final';
+    category?: Array<{
+        coding: Array<{
+            system: string;
+            code: string;
+            display: string;
+        }>;
+    }>;
+    code: {
+        coding: Array<{
+            system: string;
+            code: string;
+            display: string;
+        }>;
+        text?: string;
+    };
+    valueBoolean?: boolean;
+    valueString?: string;
+    valueQuantity?: {
+        value: number;
+        unit: string;
+        system: string;
+        code: string;
+    };
+    note?: Array<{
+        text: string;
+    }>;
+    effectiveDateTime: string;
+}
+
+/**
+ * HL7 FHIR R4 Bundle (type: collection) que agrupa el RiskAssessment del
+ * triage junto con las Observations auto-reportadas.
+ */
+export interface FHIRBundle {
+    resourceType: 'Bundle';
+    type: 'collection';
+    timestamp: string;
+    entry: Array<{
+        resource: FHIRRiskAssessment | FHIRObservation;
+    }>;
 }

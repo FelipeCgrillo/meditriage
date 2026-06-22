@@ -39,6 +39,56 @@ export function generateAnonymousCode(): string {
 }
 
 /**
+ * Normaliza un RUT chileno para hashing determinista.
+ * Quita puntos, guiones y espacios, y pasa el dígito verificador a mayúscula.
+ * Así "12.345.678-k", "12345678-K" y "123456 78k" producen el mismo hash.
+ */
+function normalizeRut(rut: string): string {
+    return rut.replace(/[.\-\s]/g, '').toUpperCase();
+}
+
+/**
+ * Deriva un código anónimo DETERMINISTA en formato ABC-123 a partir de un
+ * RUT, usando SHA-256 (Web Crypto API, disponible en edge y en el navegador).
+ *
+ * Propiedades:
+ *  - DETERMINISTA: el mismo RUT (con el mismo salt) produce SIEMPRE el mismo
+ *    código. Esto permite vincular registros del mismo paciente sin almacenar
+ *    el RUT.
+ *  - El RUT se hashea EN CLIENTE y NUNCA se envía ni se almacena en claro
+ *    (coherente con el filtro PII y la Ley 19.628). Solo viaja/persiste el
+ *    código derivado.
+ *  - El salt opcional permite separar dominios (p. ej. por estudio) sin
+ *    cambiar el algoritmo.
+ *
+ * El hash hex se mapea al alfabeto legible (sin I/L/O ni 0/1) para mantener
+ * el formato ABC-123 ya usado en la UI.
+ *
+ * @param rut  RUT del paciente (cualquier formato chileno habitual).
+ * @param salt Salt opcional para separar dominios de identificación.
+ * @returns    Código determinista en formato ABC-123.
+ */
+export async function hashRut(rut: string, salt: string = ''): Promise<string> {
+    const normalized = normalizeRut(rut);
+    const data = new TextEncoder().encode(`${salt}:${normalized}`);
+    const digest = await crypto.subtle.digest('SHA-256', data);
+    const bytes = new Uint8Array(digest);
+
+    let code = '';
+    // 3 letras del alfabeto permitido, derivadas de los primeros 3 bytes.
+    for (let i = 0; i < 3; i++) {
+        code += ALLOWED_LETTERS.charAt(bytes[i] % ALLOWED_LETTERS.length);
+    }
+    code += '-';
+    // 3 números del alfabeto permitido, derivados de los 3 bytes siguientes.
+    for (let i = 0; i < 3; i++) {
+        code += ALLOWED_NUMBERS.charAt(bytes[i + 3] % ALLOWED_NUMBERS.length);
+    }
+
+    return code;
+}
+
+/**
  * Validates that a code matches the expected format
  * @param code - The code to validate
  * @returns true if valid, false otherwise
