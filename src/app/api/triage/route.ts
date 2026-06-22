@@ -4,9 +4,8 @@ import { TRIAGE_SYSTEM_PROMPT } from '@/lib/ai/prompts';
 import { sanitizeForAI } from '@/lib/utils/pii-filter';
 import { DEFAULT_ANTHROPIC_MODEL, getAnthropicModelId } from '@/lib/ai/config';
 import { FALLBACK_PAYLOAD, buildFallbackStreamResponse } from '@/lib/ai/safe-stream';
-import { TriageResponseSchema, type TriageResponse } from '@/lib/ai/schemas';
-import { evaluateRules } from '@/lib/triage/ruleEngine';
-import type { CMDFeatures } from '@/lib/triage/cmd';
+import { TriageResponseSchema } from '@/lib/ai/schemas';
+import { applyRuleEngineSafeguard, buildDemographicsSystemMessage } from '@/lib/triage/classify';
 
 export const runtime = 'edge';
 
@@ -72,30 +71,13 @@ export async function POST(req: Request) {
         // Bloque de contexto demográfico. El cliente ya recolectó género
         // biológico y grupo etario en el wizard de consentimiento; se inyecta
         // aquí para que el modelo no lo vuelva a preguntar ni formule
-        // preguntas anatómicamente imposibles.
+        // preguntas anatómicamente imposibles. Helper compartido con el
+        // módulo DAU para no duplicar el texto del prompt.
         // ---------------------------------------------------------------
-        const GENDER_LABEL: Record<string, string> = {
-            M: 'masculino',
-            F: 'femenino',
-            Other: 'otro',
-            'Prefer not to say': 'no declarado',
-        };
-        const AGE_LABEL: Record<string, string> = {
-            Pediatric: 'pediátrico (0-17 años)',
-            Adult: 'adulto (18-64 años)',
-            Geriatric: 'geriátrico (65+ años)',
-        };
-        const genderText = demographics?.gender
-            ? GENDER_LABEL[demographics.gender] ?? demographics.gender
-            : 'no declarado';
-        const ageText = demographics?.ageGroup
-            ? AGE_LABEL[demographics.ageGroup] ?? demographics.ageGroup
-            : 'no declarado';
-        const demographicsSystemMessage = `### CONTEXTO DEL PACIENTE (ya recolectado en consentimiento)
-Sexo biológico declarado: ${genderText}.
-Grupo etario declarado: ${ageText}.
-
-Usa estos datos para tus decisiones clínicas. NO los preguntes de nuevo. NO formules preguntas anatómicamente imposibles para el sexo declarado.`;
+        const demographicsSystemMessage = buildDemographicsSystemMessage(
+            demographics?.gender,
+            demographics?.ageGroup,
+        );
 
         const lastUserMessage = messages[messages.length - 1];
         if (lastUserMessage.role !== 'user') {
@@ -155,65 +137,24 @@ Usa estos datos para tus decisiones clínicas. NO los preguntes de nuevo. NO for
 }
 
 /**
- * Aplica el safeguard híbrido (motor de reglas determinista) sobre el objeto
- * propuesto por el LLM y devuelve la respuesta final + el origen de la
- * decisión.
- */
-function applyRuleEngineSafeguard(llmResponse: TriageResponse): TriageResponse {
-    const features = (llmResponse.extracted_features ?? {}) as CMDFeatures;
-    const evaluation = evaluateRules(features);
-
-    // Punto de partida: lo que propuso el LLM.
-    const merged: TriageResponse = {
-        ...llmResponse,
-        matched_rule: evaluation.matchedRule,
-        rule_rationale: evaluation.rationale,
-        decision_source: 'llm',
-    };
-
-    // Fallo seguro: el motor exige más información para descartar ESI 1/2.
-    if (evaluation.needsInfo) {
-        return {
-            ...merged,
-            status: 'needs_info',
-            decision_source: 'rule_engine',
-            follow_up_question:
-                merged.follow_up_question ??
-                'Para clasificar con seguridad necesito un poco más de información. ¿Puede describir si tiene dificultad para respirar, alteración de conciencia o algún otro síntoma grave?',
-            reason_for_question:
-                merged.reason_for_question ?? `Datos críticos faltantes: ${evaluation.missingCritical.join(', ')}.`,
-        };
-    }
-
-    // Override del peor caso: si el motor detecta ESI 1/2 y el LLM propuso un
-    // nivel MENOS grave (o ninguno), gana el motor.
-    if (evaluation.esiLevel === 1 || evaluation.esiLevel === 2) {
-        const llmLevel = merged.esi_level ?? Infinity;
-        if (merged.status !== 'success' || llmLevel > evaluation.esiLevel) {
-            return {
-                ...merged,
-                status: 'success',
-                esi_level: evaluation.esiLevel,
-                decision_source: 'rule_engine_override',
-                reasoning: `${evaluation.rationale} (Regla ${evaluation.matchedRule}; sobre-escribe la propuesta del modelo por principio del peor caso.)`,
-            };
-        }
-        // El LLM ya proponía un nivel igual o más grave: el motor lo confirma.
-        return { ...merged, decision_source: 'rule_engine' };
-    }
-
-    // Sin criterio crítico: se conserva la propuesta del LLM en rango no crítico.
-    return merged;
-}
-
-/**
  * Construye el ReadableStream final. Espera el objeto completo del modelo,
  * aplica el safeguard, valida con safeParse y emite un text-delta del AI SDK
  * (`0:"..."`) seguido de un finish frame, de modo que useChat/extractJSON lo
  * consuman sin cambios mayores en el cliente.
+ *
+ * ───────────────────────────────────────────────────────────────────────────
+ * FIX DE REGRESIÓN (chat colgado en "Analizando síntomas…"):
+ *   `streamObject(...).object` SOLO resuelve cuando se consume el stream del
+ *   resultado: la resolución de la promesa ocurre dentro del `transform`/
+ *   `flush` de `originalStream` (ver node_modules/ai/dist/index.mjs). El código
+ *   anterior hacía `await result.object` SIN consumir ningún stream, por lo que
+ *   la promesa nunca resolvía, el endpoint quedaba colgado y el cliente nunca
+ *   recibía frames (se quedaba en "Analizando síntomas…"). Aquí drenamos
+ *   `partialObjectStream` para empujar la generación antes de leer `.object`.
+ * ───────────────────────────────────────────────────────────────────────────
  */
 function buildStructuredStream(
-    result: { object: Promise<unknown> },
+    result: { object: Promise<unknown>; partialObjectStream: AsyncIterable<unknown> },
     modelId: string,
 ): ReadableStream<Uint8Array> {
     const encoder = new TextEncoder();
@@ -224,6 +165,12 @@ function buildStructuredStream(
     return new ReadableStream<Uint8Array>({
         async start(controller) {
             try {
+                // Drenar el stream para DRIVE la generación: sin esto,
+                // `result.object` nunca resuelve (ver nota de regresión arriba).
+                for await (const _partial of result.partialObjectStream) {
+                    void _partial;
+                }
+
                 // `result.object` resuelve con el objeto completo o rechaza si
                 // la generación no produjo un objeto conforme al schema.
                 const raw = await result.object;
@@ -241,7 +188,7 @@ function buildStructuredStream(
                     return;
                 }
 
-                // Safeguard híbrido determinista.
+                // Safeguard híbrido determinista (helper compartido con DAU).
                 const finalResponse = applyRuleEngineSafeguard(parsed.data);
 
                 controller.enqueue(encoder.encode(textDeltaFrame(JSON.stringify(finalResponse))));
