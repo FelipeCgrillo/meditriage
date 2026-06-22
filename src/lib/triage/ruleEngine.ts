@@ -63,10 +63,45 @@ const CRITICAL_FEATURE_CHECKS: Array<{
 ];
 
 /**
+ * Opciones de evaluación del motor.
+ */
+export interface EvaluateOptions {
+    /**
+     * Modo retrospectivo de un solo turno (Vía B / análisis de DAU).
+     *
+     * En el chat en vivo (Vía A), cuando faltan los campos críticos
+     * (conciencia, dificultad respiratoria, ideación suicida) el motor exige
+     * más información (`needsInfo=true`) y el paciente responde la repregunta.
+     * Pero en el estudio retrospectivo de DAU NO hay un segundo turno: el
+     * registro es texto fijo y nadie contesta. Forzar `needs_info` dejaría sin
+     * clasificar todos los casos de baja urgencia cuyo relato no mencione
+     * explícitamente esos criterios de alarma.
+     *
+     * Con `retrospective=true` se aplica la convención estándar de auditoría
+     * retrospectiva de fichas: "lo no documentado como presente se asume
+     * ausente". Es decir, un campo crítico `no_referido`/ausente se interpreta
+     * como NEGATIVO PRESUNTO, de modo que —si ninguna regla crítica disparó— el
+     * motor NO bloquea con needs_info y delega la asignación ESI 3/4/5 al LLM.
+     *
+     * IMPORTANTE: esto solo cambia la Vía B (un solo turno por naturaleza). La
+     * seguridad de la Vía A (chat) NO se relaja: con el default `false` el chat
+     * sigue repreguntando ante datos críticos ausentes.
+     */
+    retrospective?: boolean;
+}
+
+/**
  * Evalúa las features del CMD contra el catálogo de reglas en orden
  * jerárquico (ESI1 → ESI5). Determinista y sin efectos secundarios.
+ *
+ * `options.retrospective` activa el modo de un solo turno de la Vía B (ver
+ * `EvaluateOptions`). Por defecto es `false`: el comportamiento del chat en
+ * vivo queda intacto.
  */
-export function evaluateRules(features: TriageFeatures): RuleEvaluation {
+export function evaluateRules(
+    features: TriageFeatures,
+    options: EvaluateOptions = {},
+): RuleEvaluation {
     const firedRules: string[] = [];
     let winner: { id: string; esiLevel: number; rationale: string } | null = null;
 
@@ -106,7 +141,11 @@ export function evaluateRules(features: TriageFeatures): RuleEvaluation {
     // información en lugar de asumir estabilidad.
     const missingCritical = CRITICAL_FEATURE_CHECKS.filter((c) => c.isMissing(features)).map((c) => c.field);
 
-    if (missingCritical.length > 0) {
+    // Modo retrospectivo (Vía B): "lo no documentado como presente se asume
+    // ausente". No hay segundo turno para repreguntar, así que los campos
+    // críticos ausentes se tratan como negativo presunto y NO se bloquea con
+    // needs_info. La asignación ESI 3/4/5 la realiza el LLM (rango no crítico).
+    if (missingCritical.length > 0 && !options.retrospective) {
         return {
             matchedRule: null,
             esiLevel: null,
@@ -118,15 +157,19 @@ export function evaluateRules(features: TriageFeatures): RuleEvaluation {
         };
     }
 
-    // No hay criterio crítico y los datos mínimos están presentes: el motor no
-    // fuerza un nivel; la asignación dentro del rango NO crítico (ESI 3/4/5)
-    // queda a cargo del LLM por estimación de recursos (ver route.ts).
+    // No hay criterio crítico y (a) los datos mínimos están presentes, o (b)
+    // estamos en modo retrospectivo con negativo presunto: el motor no fuerza
+    // un nivel; la asignación dentro del rango NO crítico (ESI 3/4/5) queda a
+    // cargo del LLM por estimación de recursos (ver route.ts).
+    const rationale =
+        missingCritical.length > 0
+            ? `Modo retrospectivo (Vía B): criterios críticos no referidos en el DAU se asumen ausentes (negativo presunto: ${missingCritical.join(', ')}). Clasificación en rango no crítico (ESI 3-5) delegada a la estimación de recursos.`
+            : 'Sin disparo de reglas críticas y con datos mínimos presentes: clasificación en rango no crítico (ESI 3-5) delegada a la estimación de recursos.';
     return {
         matchedRule: null,
         esiLevel: null,
         firedRules,
-        rationale:
-            'Sin disparo de reglas críticas y con datos mínimos presentes: clasificación en rango no crítico (ESI 3-5) delegada a la estimación de recursos.',
+        rationale,
         needsInfo: false,
         missingCritical: [],
     };

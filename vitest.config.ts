@@ -19,6 +19,7 @@ export default defineConfig({
         environment: 'node',
         include: [
             '__tests__/safety/rule-engine-determinism.test.ts',
+            '__tests__/safety/rule-engine-retrospective.test.ts',
             '__tests__/safety/cmd-schema.test.ts',
             '__tests__/safety/rut-hash.test.ts',
             '__tests__/safety/fhir-observation.test.ts',
