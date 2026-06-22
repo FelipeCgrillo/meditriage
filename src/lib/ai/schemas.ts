@@ -1,4 +1,15 @@
 import { z } from 'zod';
+import { CMDSchema } from '@/lib/triage/cmd';
+
+/**
+ * Origen de la decisión ESI final.
+ *  - 'llm'                 → el nivel propuesto por el LLM se mantuvo.
+ *  - 'rule_engine'         → el motor determinista asignó el nivel directamente.
+ *  - 'rule_engine_override'→ el motor detectó ESI 1/2 y sobre-escribió un nivel
+ *                            menos grave propuesto por el LLM (peor caso).
+ */
+export const DecisionSourceSchema = z.enum(['llm', 'rule_engine', 'rule_engine_override']);
+export type DecisionSource = z.infer<typeof DecisionSourceSchema>;
 
 /**
  * Zod schema for completed ESI Triage Result
@@ -93,6 +104,31 @@ export const TriageResponseSchema = z.object({
         .max(5)
         .optional()
         .describe("Suggested quick reply options for the patient (max 5). Example: ['Sí', 'No', 'No estoy seguro']. Recommended when status=needs_info."),
+
+    // ── Features estructuradas del CMD extraídas por el LLM ──────────────
+    // El LLM rellena SOLO lo que el paciente refirió en la conversación
+    // (auto-reporte; el sistema no instrumenta signos vitales). El motor de
+    // reglas determinista (ruleEngine.ts) opera sobre este objeto.
+    extracted_features: CMDSchema.optional().describe(
+        'CMD auto-reportado extraído de la conversación. Rellenar solo lo que el paciente refirió; el resto se omite.',
+    ),
+
+    // ── Campos del motor de reglas (se añaden SERVER-SIDE tras evaluar) ──
+    // No los rellena el LLM; los completa route.ts tras correr el motor.
+    matched_rule: z
+        .string()
+        .nullable()
+        .optional()
+        .describe('Id de la regla ESI que disparó en el motor determinista (P1.1–P5.1), o null.'),
+
+    rule_rationale: z
+        .string()
+        .optional()
+        .describe('Justificación clínica de la regla disparada o del fallo seguro del motor.'),
+
+    decision_source: DecisionSourceSchema.optional().describe(
+        'Origen de la decisión final: llm | rule_engine | rule_engine_override.',
+    ),
 });
 
 export type TriageResponse = z.infer<typeof TriageResponseSchema>;

@@ -34,7 +34,10 @@ export const aiModel = anthropic(getAnthropicModelId());
  * AI Generation Settings
  */
 export const AI_CONFIG = {
-    temperature: 0.3, // Low temperature for consistent medical reasoning
+    // Temperatura unificada a 0.1 (igual que /api/triage/route.ts) para
+    // maximizar la consistencia del razonamiento clínico del LLM. El
+    // determinismo fuerte lo aporta el motor de reglas, no el LLM.
+    temperature: 0.1, // Low temperature for consistent medical reasoning
     maxTokens: 1000,
     topP: 0.9,
 } as const;

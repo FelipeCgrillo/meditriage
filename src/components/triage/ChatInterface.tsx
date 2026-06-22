@@ -17,6 +17,11 @@ interface TriageResponse {
     response_options?: string[];
     error?: boolean;
     message?: string;
+    // Campos del CMD estructurado y del motor de reglas (Brechas 1, 2 y 5).
+    extracted_features?: Record<string, unknown> | null;
+    matched_rule?: string | null;
+    rule_rationale?: string;
+    decision_source?: 'llm' | 'rule_engine' | 'rule_engine_override';
 }
 
 export default function ChatInterface() {
@@ -105,6 +110,8 @@ export default function ChatInterface() {
                                     esi_level: json.esi_level,
                                     nurse_validated: false,
                                     anonymous_code: code,
+                                    // CMD estructurado auto-reportado extraído por el LLM (migración 009).
+                                    cmd_features: (json.extracted_features ?? null) as any,
                                 } as any);
 
                             if (dbError) {

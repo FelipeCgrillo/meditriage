@@ -4,6 +4,8 @@
  * be unit-tested without rendering the chat tree.
  */
 
+import type { CMDFeatures } from '@/lib/triage/cmd';
+
 export interface ChatMessageLike {
     role: 'user' | 'assistant' | 'system' | 'data' | 'tool' | string;
     content: string;
@@ -24,6 +26,9 @@ export interface ClinicalRecordPayload {
     patient_gender: string | null;
     patient_age_group: string | null;
     conversation_history: ConversationTurn[];
+    // CMD estructurado auto-reportado (ver migración 009 y src/lib/triage/cmd.ts).
+    // null cuando el LLM no extrajo features.
+    cmd_features: CMDFeatures | null;
 }
 
 export interface BuildPayloadInput {
@@ -33,6 +38,8 @@ export interface BuildPayloadInput {
     anonymousCode: string;
     gender: string | null;
     ageGroup: string | null;
+    // Features del CMD extraídas por el LLM (opcional).
+    cmdFeatures?: CMDFeatures | null;
 }
 
 export function buildConversationHistory(
@@ -67,5 +74,6 @@ export function buildClinicalRecordPayload(
         patient_gender: input.gender,
         patient_age_group: input.ageGroup,
         conversation_history: buildConversationHistory(input.messages),
+        cmd_features: input.cmdFeatures ?? null,
     };
 }

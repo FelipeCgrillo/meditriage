@@ -1,5 +1,7 @@
 import type { TriageResult } from '../ai/schemas';
-import type { FHIRRiskAssessment } from '../supabase/types';
+import type { FHIRRiskAssessment, FHIRBundle } from '../supabase/types';
+import type { CMDFeatures } from '../triage/cmd';
+import { buildObservations, buildFHIRBundle } from './fhirObservation';
 
 /**
  * FHIR Resource Builder Utilities
@@ -74,6 +76,25 @@ export function buildFHIRRiskAssessment(
         ],
         performedDateTime: new Date().toISOString(),
     };
+}
+
+/**
+ * Construye un Bundle FHIR R4 (collection) que agrupa el RiskAssessment del
+ * triage con las Observations auto-reportadas derivadas del CMD.
+ *
+ * Esto materializa la afirmación "RiskAssessment + Observation": se mantiene
+ * el RiskAssessment (evaluación de riesgo del triage) y se añade una
+ * Observation por cada hallazgo que el paciente refirió (ver fhirObservation.ts).
+ */
+export function buildTriageFHIRBundle(
+    id: string,
+    triageResult: TriageResult,
+    cmdFeatures: CMDFeatures,
+    status: 'preliminary' | 'final' = 'preliminary',
+): FHIRBundle {
+    const riskAssessment = buildFHIRRiskAssessment(id, triageResult, status);
+    const observations = buildObservations(cmdFeatures, status);
+    return buildFHIRBundle(riskAssessment, observations);
 }
 
 /**

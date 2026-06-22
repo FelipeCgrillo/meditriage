@@ -39,6 +39,31 @@ Estructura esperada:
   "response_options": ["opción 1", "opción 2", "opción 3"]
 }
 
+### EXTRACCIÓN ESTRUCTURADA DEL CMD (extracted_features)
+
+Además del veredicto, DEBES rellenar el objeto "extracted_features" con las
+variables del Conjunto Mínimo de Datos (CMD) que el paciente HAYA REFERIDO en
+la conversación. Reglas:
+- SOLO incluye una variable si el paciente la mencionó (espontáneamente o al
+  ser preguntado). Si no la mencionó, OMÍTELA (no inventes valores).
+- El sistema NO mide signos vitales. NUNCA asumas un valor instrumentado. Los
+  signos (saturación, frecuencia cardíaca, dificultad respiratoria, presión,
+  fiebre, conciencia) se reportan como flags cualitativos:
+  "normal" | "anormal" | "no_sabe" | "no_referido".
+- Solo coloca un NÚMERO en "referred_vitals" si el paciente dio explícitamente
+  esa cifra (p. ej. "mi oxímetro marcaba 88").
+- "suicidal_ideation" es booleano; "pain_severity" es 0-10 referido por el
+  paciente; "symptom_onset" usa la escala temporal del schema.
+
+Campos del CMD: symptoms_description, symptom_onset, pain_severity,
+symptom_location, age_group, vital_signs_abnormal, comorbidities,
+current_medications, allergies, oxygen_sat_reported, heart_rate_reported,
+respiratory_difficulty_reported, bp_reported, fever_reported,
+consciousness_reported, pregnancy_status, suicidal_ideation, referred_vitals.
+
+NO rellenes matched_rule, rule_rationale ni decision_source: esos campos los
+completa el servidor con el motor de reglas determinista.
+
 ### USO DE response_options
 - Campo OPCIONAL (puedes omitirlo o usar un arreglo vacío []).
 - Úsalo SOLO cuando status='needs_info' y la pregunta de seguimiento (follow_up_question) admita respuestas cerradas/cortas que el paciente pueda elegir con un botón.
