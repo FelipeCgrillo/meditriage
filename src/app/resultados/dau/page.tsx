@@ -11,8 +11,11 @@ import type { DAURecord, DAUClassification, DAUSummary, DAUBatchResponse } from 
  * tandas pequeñas cada POST cabe holgado dentro de ese límite; los resultados
  * se acumulan en el cliente y el resumen (concordancia + matriz de confusión)
  * se recalcula sobre el TOTAL con la misma función pura del servidor.
+ *
+ * Tamaño 2: el modelo tarda ~6 s por registro, así que 2 por tanda deja un
+ * margen cómodo bajo el límite de ~25 s incluso si el LLM responde lento.
  */
-const BATCH_SIZE = 3;
+const BATCH_SIZE = 2;
 
 function chunk<T>(arr: T[], size: number): T[][] {
     const out: T[][] = [];
