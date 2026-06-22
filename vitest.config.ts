@@ -22,6 +22,9 @@ export default defineConfig({
             '__tests__/safety/cmd-schema.test.ts',
             '__tests__/safety/rut-hash.test.ts',
             '__tests__/safety/fhir-observation.test.ts',
+            '__tests__/dau/dau-parser.test.ts',
+            '__tests__/dau/dau-mapping.test.ts',
+            '__tests__/dau/dau-summary.test.ts',
         ],
     },
 });
