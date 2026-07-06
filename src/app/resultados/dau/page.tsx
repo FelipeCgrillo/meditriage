@@ -43,6 +43,10 @@ export default function DAUAnalysisPage() {
     const [error, setError] = useState<string | null>(null);
     const [fileName, setFileName] = useState<string | null>(null);
     const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+    // Estado de persistencia en la base de datos.
+    const [saving, setSaving] = useState(false);
+    const [saveMsg, setSaveMsg] = useState<string | null>(null);
+    const [savedRunId, setSavedRunId] = useState<string | null>(null);
 
     async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
         const file = e.target.files?.[0];
@@ -51,6 +55,8 @@ export default function DAUAnalysisPage() {
         setResults([]);
         setSummary(null);
         setProgress(null);
+        setSaveMsg(null);
+        setSavedRunId(null);
         setFileName(file.name);
         const text = await file.text();
         const parsed = parseDAUFile(text);
@@ -68,6 +74,8 @@ export default function DAUAnalysisPage() {
         setResults([]);
         setSummary(null);
 
+        setSaveMsg(null);
+        setSavedRunId(null);
         const batches = chunk(records, BATCH_SIZE);
         const accumulated: DAUClassification[] = [];
         setProgress({ done: 0, total: records.length });
@@ -115,6 +123,41 @@ export default function DAUAnalysisPage() {
             setError((err as Error).message);
         } finally {
             setLoading(false);
+        }
+
+        // Guardado automático de la corrida completa en la base de datos.
+        if (accumulated.length > 0) {
+            await saveRun(accumulated, summarizeDAU(accumulated));
+        }
+    }
+
+    /**
+     * Persiste la corrida completa (metadatos + métricas + resultados por
+     * registro) llamando a POST /api/dau/save. Se invoca automáticamente al
+     * terminar el análisis y también manualmente con el botón "Guardar".
+     */
+    async function saveRun(res: DAUClassification[], sum: DAUSummary) {
+        if (res.length === 0) return;
+        setSaving(true);
+        setSaveMsg(null);
+        try {
+            const resp = await fetch('/api/dau/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ file_name: fileName, records, results: res, summary: sum }),
+            });
+            const data = (await resp.json()) as { ok?: boolean; run_id?: string; saved?: number; error?: string };
+            if (!resp.ok || !data.ok) {
+                setSaveMsg(data.error ?? `No se pudo guardar (error ${resp.status}).`);
+                setSavedRunId(null);
+            } else {
+                setSaveMsg(`Guardado en la base de datos: ${data.saved} registro(s).`);
+                setSavedRunId(data.run_id ?? null);
+            }
+        } catch (err) {
+            setSaveMsg(`Error al guardar: ${(err as Error).message}`);
+        } finally {
+            setSaving(false);
         }
     }
 
@@ -226,7 +269,29 @@ export default function DAUAnalysisPage() {
                         >
                             Exportar CSV
                         </button>
+                        <button
+                            onClick={() => summary && saveRun(results, summary)}
+                            disabled={results.length === 0 || loading || saving}
+                            className="rounded-md border border-blue-300 bg-white px-4 py-2 text-sm font-semibold text-blue-700 disabled:cursor-not-allowed disabled:opacity-50 hover:bg-blue-50"
+                        >
+                            {saving ? 'Guardando…' : 'Guardar en base de datos'}
+                        </button>
                     </div>
+
+                    {saveMsg && (
+                        <p
+                            className={`mt-3 text-sm ${
+                                savedRunId ? 'text-green-700' : 'text-amber-700'
+                            }`}
+                        >
+                            {saveMsg}
+                            {savedRunId && (
+                                <span className="ml-1 font-mono text-xs text-gray-500">
+                                    (corrida {savedRunId.slice(0, 8)}…)
+                                </span>
+                            )}
+                        </p>
+                    )}
 
                     {/* Barra de progreso del procesamiento por tandas */}
                     {progress && progress.total > 0 && (
