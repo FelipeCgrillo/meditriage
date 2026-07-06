@@ -37,21 +37,24 @@ export async function middleware(request: NextRequest) {
     const pathname = request.nextUrl.pathname;
 
     // Define protected routes and their required roles
+    // El orden importa: se evalúa la coincidencia MÁS específica primero, para
+    // que /resultados/dau tome su propia regla antes que /resultados.
     const protectedRoutes: Record<string, string[]> = {
-        '/nurse': ['nurse', 'admin'],
         '/nurse/dashboard': ['nurse', 'admin'],
+        '/nurse': ['nurse', 'admin'],
+        '/resultados/dau': ['researcher', 'admin'],
         '/resultados': ['researcher', 'admin'],
     };
 
-    // Check if the current path is protected
-    const matchedRoute = Object.keys(protectedRoutes).find(route =>
-        pathname.startsWith(route)
-    );
+    // Check if the current path is protected (más específica primero).
+    const matchedRoute = Object.keys(protectedRoutes)
+        .sort((a, b) => b.length - a.length)
+        .find(route => pathname === route || pathname.startsWith(`${route}/`) || pathname.startsWith(route));
 
     if (matchedRoute) {
         // User not authenticated - redirect to appropriate login
         if (!user) {
-            const loginPath = matchedRoute === '/nurse'
+            const loginPath = matchedRoute.startsWith('/nurse')
                 ? '/login/nurse'
                 : '/login/resultados';
 
