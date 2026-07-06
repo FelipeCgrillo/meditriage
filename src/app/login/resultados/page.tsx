@@ -11,7 +11,7 @@ function ResultadosLoginForm() {
     const [loading, setLoading] = useState(false);
     const router = useRouter();
     const searchParams = useSearchParams();
-    const redirectTo = searchParams.get('redirect') || '/resultados';
+    const requestedRedirect = searchParams.get('redirect');
 
     async function handleLogin(e: React.FormEvent) {
         e.preventDefault();
@@ -57,7 +57,15 @@ function ResultadosLoginForm() {
                 return;
             }
 
-            // Success - redirect to results dashboard
+            // Destino: respetar ?redirect= si existe; si no, elegir según el rol
+            // (el admin va a su panel central, el investigador a resultados).
+            let redirectTo = requestedRedirect && requestedRedirect.startsWith('/')
+                ? requestedRedirect
+                : profile.role === 'admin'
+                    ? '/admin'
+                    : '/resultados';
+
+            // Success - redirect to the appropriate dashboard
             router.push(redirectTo);
             router.refresh();
         } catch (err) {
