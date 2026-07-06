@@ -1,13 +1,22 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { requireAdmin } from '@/lib/auth/requireAdmin';
 
 // This route uses the service role key to create users
 // IMPORTANT: Only accessible server-side, never expose service role key to client
+// SEGURIDAD: cada handler exige rol admin (requireAdmin) porque la service_role
+// key ignora RLS; sin esta verificación la API quedaría abierta a internet.
+
+export const runtime = 'nodejs';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
 export async function POST(request: NextRequest) {
+    const auth = await requireAdmin();
+    if (!auth.ok) {
+        return NextResponse.json({ error: auth.error }, { status: auth.status });
+    }
     try {
         // Validate service role key exists
         if (!supabaseServiceKey) {
@@ -116,6 +125,10 @@ export async function POST(request: NextRequest) {
 
 // GET - List all users (for admin panel)
 export async function GET() {
+    const auth = await requireAdmin();
+    if (!auth.ok) {
+        return NextResponse.json({ error: auth.error }, { status: auth.status });
+    }
     try {
         if (!supabaseServiceKey) {
             return NextResponse.json(
@@ -157,6 +170,10 @@ export async function GET() {
 
 // DELETE - Delete a user
 export async function DELETE(request: NextRequest) {
+    const auth = await requireAdmin();
+    if (!auth.ok) {
+        return NextResponse.json({ error: auth.error }, { status: auth.status });
+    }
     try {
         if (!supabaseServiceKey) {
             return NextResponse.json(

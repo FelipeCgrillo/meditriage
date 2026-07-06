@@ -40,6 +40,7 @@ export async function middleware(request: NextRequest) {
     // El orden importa: se evalúa la coincidencia MÁS específica primero, para
     // que /resultados/dau tome su propia regla antes que /resultados.
     const protectedRoutes: Record<string, string[]> = {
+        '/admin': ['admin'],
         '/nurse/dashboard': ['nurse', 'admin'],
         '/nurse': ['nurse', 'admin'],
         '/resultados/dau': ['researcher', 'admin'],
@@ -54,6 +55,8 @@ export async function middleware(request: NextRequest) {
     if (matchedRoute) {
         // User not authenticated - redirect to appropriate login
         if (!user) {
+            // /admin y /resultados comparten el login de "resultados"; solo el
+            // área de enfermería usa su propio login.
             const loginPath = matchedRoute.startsWith('/nurse')
                 ? '/login/nurse'
                 : '/login/resultados';
@@ -93,13 +96,39 @@ export async function middleware(request: NextRequest) {
             .single();
 
         if (profile) {
-            if (profile.role === 'nurse' || profile.role === 'admin') {
-                url.pathname = '/nurse/dashboard';
+            // 1) Respetar el destino solicitado (?redirect=...) si el rol tiene
+            //    permiso para esa ruta. Así, tras loguearse desde /resultados/dau
+            //    el usuario vuelve exactamente ahí.
+            const requested = request.nextUrl.searchParams.get('redirect');
+            if (requested && requested.startsWith('/')) {
+                const target = Object.keys(protectedRoutes)
+                    .sort((a, b) => b.length - a.length)
+                    .find(
+                        route =>
+                            requested === route ||
+                            requested.startsWith(`${route}/`) ||
+                            requested.startsWith(route),
+                    );
+                const allowed = target ? protectedRoutes[target] : null;
+                if (!target || (allowed && allowed.includes(profile.role))) {
+                    url.pathname = requested;
+                    url.search = '';
+                    return NextResponse.redirect(url);
+                }
+            }
+
+            // 2) Destino por defecto según rol. El admin tiene su propio panel
+            //    central; researcher → resultados; nurse → enfermería.
+            if (profile.role === 'admin') {
+                url.pathname = '/admin';
             } else if (profile.role === 'researcher') {
                 url.pathname = '/resultados';
+            } else if (profile.role === 'nurse') {
+                url.pathname = '/nurse/dashboard';
             } else {
                 url.pathname = '/';
             }
+            url.search = '';
             return NextResponse.redirect(url);
         }
     }
