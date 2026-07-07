@@ -47,10 +47,15 @@ export default function DAUAnalysisPage() {
     const [saving, setSaving] = useState(false);
     const [saveMsg, setSaveMsg] = useState<string | null>(null);
     const [savedRunId, setSavedRunId] = useState<string | null>(null);
+    const [dragActive, setDragActive] = useState(false);
 
-    async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
-        const file = e.target.files?.[0];
-        if (!file) return;
+    async function processFile(file: File) {
+        // Validación básica de extensión (CSV / texto plano).
+        const name = file.name.toLowerCase();
+        if (!name.endsWith('.csv') && !name.endsWith('.txt') && file.type && !file.type.includes('csv') && !file.type.includes('text')) {
+            setError('Formato no válido. Sube un archivo CSV.');
+            return;
+        }
         setError(null);
         setResults([]);
         setSummary(null);
@@ -65,6 +70,19 @@ export default function DAUAnalysisPage() {
         if (parsed.records.length === 0) {
             setError('No se encontraron registros válidos en el archivo.');
         }
+    }
+
+    async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        await processFile(file);
+    }
+
+    function handleDrop(e: React.DragEvent<HTMLLabelElement>) {
+        e.preventDefault();
+        setDragActive(false);
+        const file = e.dataTransfer.files?.[0];
+        if (file) processFile(file);
     }
 
     async function runAnalysis() {
@@ -217,15 +235,32 @@ export default function DAUAnalysisPage() {
 
                 {/* Carga de archivo */}
                 <section className="rounded-lg border border-gray-200 bg-white p-4">
-                    <label className="block text-sm font-medium text-gray-700">
+                    <span className="block text-sm font-medium text-gray-700">
                         Cargar archivo JSON o CSV
+                    </span>
+                    <label
+                        htmlFor="dau-file-input"
+                        onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
+                        onDragEnter={(e) => { e.preventDefault(); setDragActive(true); }}
+                        onDragLeave={(e) => { e.preventDefault(); setDragActive(false); }}
+                        onDrop={handleDrop}
+                        className={`mt-2 flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-6 py-8 text-center transition-colors ${dragActive ? 'border-blue-500 bg-blue-50' : 'border-gray-300 bg-gray-50 hover:border-blue-400 hover:bg-blue-50/50'}`}
+                    >
+                        <svg className={`h-10 w-10 ${dragActive ? 'text-blue-500' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                        </svg>
+                        <span className="text-sm text-gray-700">
+                            <strong className="text-blue-600">Arrastra tu archivo aquí</strong> o haz clic para seleccionar
+                        </span>
+                        <span className="text-xs text-gray-500">Formatos aceptados: CSV o JSON</span>
+                        <input
+                            id="dau-file-input"
+                            type="file"
+                            accept=".json,.csv,application/json,text/csv"
+                            onChange={handleFile}
+                            className="hidden"
+                        />
                     </label>
-                    <input
-                        type="file"
-                        accept=".json,.csv,application/json,text/csv"
-                        onChange={handleFile}
-                        className="mt-2 block w-full text-sm text-gray-600 file:mr-4 file:rounded-md file:border-0 file:bg-blue-600 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-blue-700"
-                    />
                     {fileName && (
                         <p className="mt-2 text-sm text-gray-600">
                             <strong>{records.length}</strong> registro(s) válido(s) en{' '}
