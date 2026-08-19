@@ -51,7 +51,7 @@ export default function LandingPage() {
                     <div className="max-w-4xl mx-auto text-center">
                         <div className="inline-flex items-center gap-2 bg-blue-500/20 border border-blue-400/30 rounded-full px-4 py-2 mb-6">
                             <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
-                            <span className="text-blue-200 text-sm font-medium">Sistema de Triage Inteligente</span>
+                            <span className="text-blue-200 text-sm font-medium">Sistema Automatizado en Apoyo a la Decisión Clínica</span>
                         </div>
 
                         <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold text-white mb-6 leading-tight">
