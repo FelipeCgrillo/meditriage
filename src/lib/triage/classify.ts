@@ -7,6 +7,10 @@ import { FALLBACK_PAYLOAD } from '@/lib/ai/safe-stream';
 import { TriageResponseSchema, type TriageResponse } from '@/lib/ai/schemas';
 import { evaluateRules } from '@/lib/triage/ruleEngine';
 import type { CMDFeatures } from '@/lib/triage/cmd';
+import {
+    dispositionFromEsi,
+    suggestedActionForDisposition,
+} from '@/lib/triage/disposition';
 
 /**
  * Helper compartido de clasificación de triage.
@@ -83,6 +87,23 @@ export function applyRuleEngineSafeguard(
         decision_source: 'llm',
     };
 
+    /**
+     * Aplica la política de derivación clínica sobre una respuesta ya
+     * clasificada como success: calcula `disposition` y reemplaza
+     * `suggested_action` por el texto estandarizado. Fuente única de verdad
+     * para el chat y el módulo DAU (Brecha /goal PRD).
+     */
+    const withDisposition = (r: TriageResponse): TriageResponse => {
+        if (r.status !== 'success') return r;
+        const disposition = dispositionFromEsi(r.esi_level ?? null);
+        if (!disposition) return r;
+        return {
+            ...r,
+            disposition,
+            suggested_action: suggestedActionForDisposition(disposition),
+        };
+    };
+
     // Fallo seguro: el motor exige más información para descartar ESI 1/2.
     if (evaluation.needsInfo) {
         return {
@@ -97,25 +118,30 @@ export function applyRuleEngineSafeguard(
         };
     }
 
+    // Override del peor caso resuelto abajo. Antes, si el LLM ya llegó a
+    // status=success sin criterio crítico, aplicamos disposición al vuelo.
+
     // Override del peor caso: si el motor detecta ESI 1/2 y el LLM propuso un
     // nivel MENOS grave (o ninguno), gana el motor.
     if (evaluation.esiLevel === 1 || evaluation.esiLevel === 2) {
         const llmLevel = merged.esi_level ?? Infinity;
         if (merged.status !== 'success' || llmLevel > evaluation.esiLevel) {
-            return {
+            return withDisposition({
                 ...merged,
                 status: 'success',
                 esi_level: evaluation.esiLevel,
                 decision_source: 'rule_engine_override',
                 reasoning: `${evaluation.rationale} (Regla ${evaluation.matchedRule}; sobre-escribe la propuesta del modelo por principio del peor caso.)`,
-            };
+            });
         }
         // El LLM ya proponía un nivel igual o más grave: el motor lo confirma.
-        return { ...merged, decision_source: 'rule_engine' };
+        return withDisposition({ ...merged, decision_source: 'rule_engine' });
     }
 
-    // Sin criterio crítico: se conserva la propuesta del LLM en rango no crítico.
-    return merged;
+    // Sin criterio crítico: se conserva la propuesta del LLM en rango no crítico
+    // y se aplica la política de derivación (ESI 3 → APS mismo día, ESI 4-5 →
+    // atención al día siguiente).
+    return withDisposition(merged);
 }
 
 /** Entrada de la clasificación a partir de texto libre auto-reportado. */

@@ -129,6 +129,17 @@ export const TriageResponseSchema = z.object({
     decision_source: DecisionSourceSchema.optional().describe(
         'Origen de la decisión final: llm | rule_engine | rule_engine_override.',
     ),
+
+    // ── Disposición clínica (política de derivación por nivel ESI) ─────
+    // Se completa SIEMPRE server-side a partir de esi_level en
+    // applyRuleEngineSafeguard. El LLM NO la rellena.
+    disposition: z
+        .enum(['emergency', 'same_day_primary_care', 'next_day_primary_care'])
+        .nullable()
+        .optional()
+        .describe(
+            'Vía de atención derivada del nivel ESI: emergency (ESI 1-2), same_day_primary_care (ESI 3), next_day_primary_care (ESI 4-5).',
+        ),
 });
 
 export type TriageResponse = z.infer<typeof TriageResponseSchema>;

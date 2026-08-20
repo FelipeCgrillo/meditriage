@@ -57,6 +57,8 @@ export interface ClinicalRecord {
     conversation_history?: Json | null;
     // CMD estructurado auto-reportado (migración 009)
     cmd_features?: Json | null;
+    // Vía de atención derivada del ESI (migración 011)
+    disposition?: 'emergency' | 'same_day_primary_care' | 'next_day_primary_care' | null;
 }
 
 /**
@@ -76,6 +78,8 @@ export interface ClinicalRecordInsert {
     conversation_history?: Json | null;
     // CMD estructurado auto-reportado (migración 009)
     cmd_features?: Json | null;
+    // Vía de atención derivada del ESI (migración 011)
+    disposition?: 'emergency' | 'same_day_primary_care' | 'next_day_primary_care' | null;
 }
 
 /**

@@ -281,6 +281,28 @@ export function NurseValidation({ onClose }: NurseValidationProps) {
                                 <div className={`inline-block px-6 py-3 rounded-lg font-bold text-lg ${getESIColor(aiLevel)}`}>
                                     {getESILabel(aiLevel)}
                                 </div>
+                                {selectedRecord.disposition && (
+                                    <div className="mt-3">
+                                        <span className="block text-xs uppercase tracking-wider text-gray-500 mb-1">
+                                            Vía de atención derivada del ESI
+                                        </span>
+                                        <span
+                                            className={`inline-block px-3 py-1 rounded-full text-sm font-semibold ${
+                                                selectedRecord.disposition === 'emergency'
+                                                    ? 'bg-red-100 text-red-800'
+                                                    : selectedRecord.disposition === 'same_day_primary_care'
+                                                        ? 'bg-amber-100 text-amber-800'
+                                                        : 'bg-blue-100 text-blue-800'
+                                            }`}
+                                        >
+                                            {selectedRecord.disposition === 'emergency'
+                                                ? 'Urgencia hospitalaria'
+                                                : selectedRecord.disposition === 'same_day_primary_care'
+                                                    ? 'APS hoy'
+                                                    : 'CESFAM al día siguiente'}
+                                        </span>
+                                    </div>
+                                )}
                             </div>
 
                             {/* Critical Signs */}

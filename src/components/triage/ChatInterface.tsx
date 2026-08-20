@@ -2,11 +2,12 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useChat } from 'ai/react';
-import { Send, AlertTriangle, ShieldCheck, Bot, Loader2, CheckCircle2, RefreshCw } from 'lucide-react';
+import { Send, AlertTriangle, ShieldCheck, Bot, Loader2, CheckCircle2, RefreshCw, CalendarClock, Stethoscope } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase/client';
 import { generateAnonymousCode } from '@/lib/utils/anonymousCode';
 import { extractJSON } from '@/lib/utils/validation';
+import { dispositionTitle, type Disposition } from '@/lib/triage/disposition';
 
 interface TriageResponse {
     status: 'success' | 'needs_info' | 'error';
@@ -22,6 +23,8 @@ interface TriageResponse {
     matched_rule?: string | null;
     rule_rationale?: string;
     decision_source?: 'llm' | 'rule_engine' | 'rule_engine_override';
+    // Política de derivación clínica (PRD /goal). Server-side, derivada del ESI.
+    disposition?: Disposition | null;
 }
 
 export default function ChatInterface() {
@@ -112,6 +115,8 @@ export default function ChatInterface() {
                                     anonymous_code: code,
                                     // CMD estructurado auto-reportado extraído por el LLM (migración 009).
                                     cmd_features: (json.extracted_features ?? null) as any,
+                                    // Vía de atención derivada del ESI (migración 011).
+                                    disposition: json.disposition ?? null,
                                 } as any);
 
                             if (dbError) {
@@ -360,6 +365,46 @@ export default function ChatInterface() {
                                             }`}
                                     >
                                         Criterio IA: ESI {triageData.esi_level}
+                                    </div>
+                                )}
+
+                                {/* Tarjeta de disposición clínica (PRD /goal). Diferencia
+                                    tres vías de atención según ESI: urgencia,
+                                    APS mismo día, atención al día siguiente. */}
+                                {triageData?.status === 'success' && triageData.disposition && !isLoading && (
+                                    <div
+                                        role="note"
+                                        aria-label={`Vía de atención: ${dispositionTitle(triageData.disposition)}`}
+                                        className={`mt-4 rounded-2xl border p-4 flex gap-3 items-start ${
+                                            triageData.disposition === 'emergency'
+                                                ? 'bg-red-50 border-red-200 text-red-900'
+                                                : triageData.disposition === 'same_day_primary_care'
+                                                    ? 'bg-amber-50 border-amber-200 text-amber-900'
+                                                    : 'bg-blue-50 border-blue-200 text-blue-900'
+                                        }`}
+                                    >
+                                        <div className="shrink-0 mt-0.5">
+                                            {triageData.disposition === 'emergency' ? (
+                                                <AlertTriangle className="w-5 h-5" />
+                                            ) : triageData.disposition === 'same_day_primary_care' ? (
+                                                <Stethoscope className="w-5 h-5" />
+                                            ) : (
+                                                <CalendarClock className="w-5 h-5" />
+                                            )}
+                                        </div>
+                                        <div className="flex-1">
+                                            <p className="text-xs font-black uppercase tracking-wider mb-1">
+                                                {dispositionTitle(triageData.disposition)}
+                                            </p>
+                                            <p className="text-sm leading-relaxed font-medium">
+                                                {triageData.suggested_action}
+                                            </p>
+                                            {triageData.disposition !== 'emergency' && (
+                                                <p className="text-[11px] mt-2 opacity-80">
+                                                    Si empeora antes de la cita o presenta riesgo vital, llame al 131.
+                                                </p>
+                                            )}
+                                        </div>
                                     </div>
                                 )}
 
