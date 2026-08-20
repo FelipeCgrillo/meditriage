@@ -67,10 +67,10 @@ export async function middleware(request: NextRequest) {
             return NextResponse.redirect(url);
         }
 
-        // Get user's role from profile
+        // Get user's role and account state from profile
         const { data: profile } = await supabase
             .from('user_profiles')
-            .select('role')
+            .select('role, is_active, must_change_password, organization_id')
             .eq('id', user.id)
             .single();
 
@@ -80,6 +80,25 @@ export async function middleware(request: NextRequest) {
             // User doesn't have the required role
             const url = request.nextUrl.clone();
             url.pathname = '/unauthorized';
+            return NextResponse.redirect(url);
+        }
+
+        // Cuenta desactivada (PRD I1 CA-06/CA-08). Nunca dejamos operar.
+        if (profile.is_active === false) {
+            const url = request.nextUrl.clone();
+            url.pathname = '/unauthorized';
+            return NextResponse.redirect(url);
+        }
+
+        // Cambio de contraseña forzado al primer login (PRD I1 CA-14).
+        // Solo se libera cuando el usuario ya está en la página de cambio.
+        if (
+            profile.must_change_password === true &&
+            !pathname.startsWith('/account/change-password')
+        ) {
+            const url = request.nextUrl.clone();
+            url.pathname = '/account/change-password';
+            url.searchParams.set('redirect', pathname);
             return NextResponse.redirect(url);
         }
     }

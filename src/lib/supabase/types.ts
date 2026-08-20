@@ -59,6 +59,8 @@ export interface ClinicalRecord {
     cmd_features?: Json | null;
     // Vía de atención derivada del ESI (migración 011)
     disposition?: 'emergency' | 'same_day_primary_care' | 'next_day_primary_care' | null;
+    // Tenant (migración 012). NOT NULL en DB: siempre presente en lecturas.
+    organization_id: string;
 }
 
 /**
@@ -80,6 +82,8 @@ export interface ClinicalRecordInsert {
     cmd_features?: Json | null;
     // Vía de atención derivada del ESI (migración 011)
     disposition?: 'emergency' | 'same_day_primary_care' | 'next_day_primary_care' | null;
+    // Tenant (migración 012). NOT NULL en DB: obligatorio al insertar.
+    organization_id: string;
 }
 
 /**
@@ -93,6 +97,40 @@ export interface ClinicalRecordUpdate {
     updated_at?: string;
     ai_response?: Json;
     fhir_bundle?: Json;
+}
+
+/**
+ * Organización / tenant (migración 012).
+ *
+ * Un CESFAM, hospital o servicio de salud. Todos los datos clínicos y de
+ * usuarios se aislan por `organization_id`. El slug es el identificador
+ * URL-safe que aparece en el link del paciente (/paciente?org=<slug>).
+ */
+export interface Organization {
+    id: string;
+    slug: string;
+    name: string;
+    is_active: boolean;
+    created_at: string;
+    updated_at: string;
+}
+
+/**
+ * User profile (migración 006 + extensión 012).
+ *
+ * `organization_id` es NULL solo para el admin de plataforma (rol `admin`
+ * sin tenant asignado, que administra la instalación completa).
+ */
+export interface UserProfile {
+    id: string;
+    email: string;
+    role: 'nurse' | 'researcher' | 'admin';
+    full_name: string | null;
+    organization_id: string | null;
+    is_active: boolean;
+    must_change_password: boolean;
+    created_at: string;
+    updated_at: string;
 }
 
 /**

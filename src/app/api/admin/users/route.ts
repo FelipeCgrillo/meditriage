@@ -46,6 +46,33 @@ export async function POST(request: NextRequest) {
             );
         }
 
+        // PRD I1 CA-07: la organización del nuevo usuario se FUERZA desde
+        // el perfil del caller. Solo el admin de plataforma (sin tenant)
+        // puede especificar `organizationId` en el body para crear
+        // administradores de otras organizaciones.
+        let targetOrgId: string | null;
+        if (auth.isPlatformAdmin) {
+            const explicit = typeof body.organizationId === 'string' ? body.organizationId : null;
+            // Un admin de plataforma nuevo (sin org) es válido; el resto
+            // requiere org explícita.
+            if (role !== 'admin' && !explicit) {
+                return NextResponse.json(
+                    { error: 'organizationId es obligatorio para roles distintos de admin de plataforma' },
+                    { status: 400 },
+                );
+            }
+            targetOrgId = explicit;
+        } else {
+            // Admin de tenant: siempre crea dentro de su propia organización.
+            targetOrgId = auth.organizationId;
+            if (!targetOrgId) {
+                return NextResponse.json(
+                    { error: 'Caller admin sin organización asignada.' },
+                    { status: 403 },
+                );
+            }
+        }
+
         // Validate password length
         if (password.length < 6) {
             return NextResponse.json(
@@ -84,7 +111,8 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Create user profile with role
+        // Create user profile with role.
+        // must_change_password=true fuerza el cambio en el primer login (CA-14).
         const { error: profileError } = await supabaseAdmin
             .from('user_profiles')
             .insert({
@@ -92,6 +120,9 @@ export async function POST(request: NextRequest) {
                 email: email,
                 role: role,
                 full_name: fullName || null,
+                organization_id: targetOrgId,
+                is_active: true,
+                must_change_password: true,
             });
 
         if (profileError) {
@@ -144,11 +175,16 @@ export async function GET() {
             }
         });
 
-        // Get all user profiles
-        const { data: profiles, error } = await supabaseAdmin
+        // Un admin de tenant sólo ve los usuarios de su organización
+        // (PRD I1 CA-01). El admin de plataforma ve todos.
+        let query = supabaseAdmin
             .from('user_profiles')
             .select('*')
             .order('created_at', { ascending: false });
+        if (!auth.isPlatformAdmin && auth.organizationId) {
+            query = query.eq('organization_id', auth.organizationId);
+        }
+        const { data: profiles, error } = await query;
 
         if (error) {
             return NextResponse.json(
@@ -198,6 +234,23 @@ export async function DELETE(request: NextRequest) {
                 persistSession: false
             }
         });
+
+        // PRD I1 CA-07: un admin de tenant sólo puede borrar usuarios de
+        // su propia organización. El admin de plataforma no tiene esa
+        // restricción.
+        if (!auth.isPlatformAdmin) {
+            const { data: target, error: targetError } = await supabaseAdmin
+                .from('user_profiles')
+                .select('organization_id')
+                .eq('id', userId)
+                .single();
+            if (targetError || !target || target.organization_id !== auth.organizationId) {
+                return NextResponse.json(
+                    { error: 'No autorizado para borrar este usuario.' },
+                    { status: 403 },
+                );
+            }
+        }
 
         // Delete user from auth (profile will cascade delete due to foreign key)
         const { error } = await supabaseAdmin.auth.admin.deleteUser(userId);

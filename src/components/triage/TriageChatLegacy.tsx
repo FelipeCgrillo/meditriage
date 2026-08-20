@@ -22,6 +22,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useChat } from 'ai/react';
 import {
     Bot,
@@ -32,7 +33,7 @@ import {
     Mic,
     MicOff,
 } from 'lucide-react';
-import { supabase, isSupabaseConfigured } from '@/lib/supabase/client';
+
 import { generateAnonymousCode } from '@/lib/utils/anonymousCode';
 import { extractJSON } from '@/lib/utils/validation';
 import {
@@ -89,6 +90,39 @@ interface TriageChatLegacyProps {
 
 
 export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) {
+    // Tenant desde la URL (?org=<slug>). Ver PRD I1 CA-04/CA-05.
+    const searchParams = useSearchParams();
+    const orgSlug = (searchParams?.get('org') ?? '').toLowerCase();
+    const [orgState, setOrgState] = useState<'loading' | 'valid' | 'invalid'>('loading');
+    const [orgName, setOrgName] = useState<string | null>(null);
+
+    useEffect(() => {
+        let cancelled = false;
+        async function validateOrg() {
+            if (!orgSlug) {
+                if (!cancelled) setOrgState('invalid');
+                return;
+            }
+            try {
+                const res = await fetch(`/api/patient/organization?slug=${encodeURIComponent(orgSlug)}`);
+                const json = await res.json();
+                if (cancelled) return;
+                if (json?.valid) {
+                    setOrgName(json.name ?? null);
+                    setOrgState('valid');
+                } else {
+                    setOrgState('invalid');
+                }
+            } catch {
+                if (!cancelled) setOrgState('invalid');
+            }
+        }
+        validateOrg();
+        return () => {
+            cancelled = true;
+        };
+    }, [orgSlug]);
+
     const [consentStep, setConsentStep] = useState<ConsentStep>('welcome');
     const [demographics, setDemographics] = useState<DemographicData>({
         gender: null,
@@ -149,41 +183,29 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
 
     const messagesRef = useRef<Array<{ role: string; content: string }>>([]);
 
+    // Persistencia server-side via /api/patient/record (PRD I1). Se manda
+    // el slug de la organización como parte del payload; el server valida
+    // que exista y esté activa antes de insertar.
     const persistRecord = useCallback(
-        async (payload: ClinicalRecordPayload): Promise<void> => {
-            if (!isSupabaseConfigured) {
-                console.warn(
-                    '[triage] Supabase not configured; skipping clinical record persistence',
-                );
-                return;
-            }
-            // Defensive 12s timeout: Safari iOS occasionally lets fetch
-            // promises hang indefinitely when the network/connection is
-            // unstable. Without this the patient just sees the final
-            // bubble forever — no error banner, no finalize screen.
-            const insertPromise = supabase
-                .from('clinical_records')
-                .insert(payload as never);
-            const timeoutPromise = new Promise<{ error: { message: string } }>(
-                (resolve) =>
-                    setTimeout(
-                        () =>
-                            resolve({
-                                error: {
-                                    message:
-                                        'tiempo de espera agotado guardando la evaluación',
-                                },
-                            }),
-                        12_000,
-                    ),
-            );
-            const { error: dbError } = (await Promise.race([
-                insertPromise,
-                timeoutPromise,
-            ])) as { error: { message: string } | null };
-            if (dbError) {
-                console.error('Error saving record:', dbError);
-                throw new Error(dbError.message || 'insert failed');
+        async (payload: ClinicalRecordPayload, orgSlugForCall: string): Promise<void> => {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 12_000);
+            try {
+                const res = await fetch('/api/patient/record', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ...payload, org_slug: orgSlugForCall }),
+                    signal: controller.signal,
+                });
+                if (!res.ok) {
+                    const detail = await res.json().catch(() => ({}));
+                    throw new Error(detail?.message || `persist failed (${res.status})`);
+                }
+            } catch (e) {
+                console.error('Error saving record:', e);
+                throw e instanceof Error ? e : new Error('insert failed');
+            } finally {
+                clearTimeout(timeout);
             }
         },
         [],
@@ -305,7 +327,7 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
                 setSaveError(null);
                 setIsSaving(true);
                 try {
-                    await persistRecord(payload);
+                    await persistRecord(payload, orgSlug);
                     pendingPayloadRef.current = null;
                     setIsFinished(true);
                     onFinished?.(code, currentDemographics);
@@ -329,7 +351,7 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
         setSaveError(null);
         setIsSaving(true);
         try {
-            await persistRecord(payload);
+            await persistRecord(payload, orgSlug);
             pendingPayloadRef.current = null;
             setIsFinished(true);
             onFinished?.(payload.anonymous_code, demographicsRef.current);
@@ -341,7 +363,7 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
         } finally {
             setIsSaving(false);
         }
-    }, [isSaving, onFinished, persistRecord]);
+    }, [isSaving, onFinished, persistRecord, orgSlug]);
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -510,6 +532,36 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
     const showErrorBanner =
         !isLoading &&
         (Boolean(error) || latestAssistantHasError || Boolean(streamError));
+
+    // Bloqueo por tenant (PRD I1 CA-04/CA-05). No dejamos ver el flujo si
+    // el link no trae un slug válido de organización activa.
+    if (orgState === 'loading') {
+        return (
+            <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-b from-indigo-50/80 via-white to-white p-6">
+                <div className="bg-white rounded-2xl shadow-xl px-6 py-8 flex items-center gap-3">
+                    <div className="w-5 h-5 rounded-full border-2 border-indigo-600 border-t-transparent animate-spin" />
+                    <p className="text-gray-700 font-medium">Validando enlace...</p>
+                </div>
+            </div>
+        );
+    }
+
+    if (orgState === 'invalid') {
+        return (
+            <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-b from-indigo-50/80 via-white to-white p-6">
+                <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden border border-gray-100">
+                    <div className="bg-red-600 p-6 text-white text-center">
+                        <AlertTriangle className="w-10 h-10 mx-auto mb-2" />
+                        <h2 className="text-xl font-bold">Enlace no válido</h2>
+                    </div>
+                    <div className="p-6 text-gray-700 leading-relaxed">
+                        <p>Este enlace no es válido, consulte con su CESFAM.</p>
+                        <p className="mt-3 text-sm text-gray-500">Si tiene una emergencia, llame al 131.</p>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     // Final success screen — anonymous code reveal.
     if (isFinished && anonymousCode) {

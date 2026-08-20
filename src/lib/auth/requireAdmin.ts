@@ -11,8 +11,20 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
  * que DEBEN verificar el rol explícitamente. De lo contrario quedarían abiertas
  * a cualquiera en internet.
  */
+/**
+ * Resultado positivo de la autorización. `organizationId` es null solo
+ * para el admin de plataforma (rol admin sin tenant asignado, PRD I1).
+ * `isPlatformAdmin` es azucar para (role='admin' AND organization_id IS NULL).
+ */
+export interface RequireAdminOk {
+    ok: true;
+    userId: string;
+    organizationId: string | null;
+    isPlatformAdmin: boolean;
+}
+
 export async function requireAdmin(): Promise<
-    { ok: true; userId: string } | { ok: false; status: number; error: string }
+    RequireAdminOk | { ok: false; status: number; error: string }
 > {
     const supabase = await createSupabaseServerClient();
 
@@ -27,7 +39,7 @@ export async function requireAdmin(): Promise<
 
     const { data: profile, error: profileError } = await supabase
         .from('user_profiles')
-        .select('role')
+        .select('role, organization_id, is_active')
         .eq('id', user.id)
         .single();
 
@@ -35,5 +47,14 @@ export async function requireAdmin(): Promise<
         return { ok: false, status: 403, error: 'Requiere rol de administrador.' };
     }
 
-    return { ok: true, userId: user.id };
+    if (profile.is_active === false) {
+        return { ok: false, status: 403, error: 'Cuenta desactivada.' };
+    }
+
+    return {
+        ok: true,
+        userId: user.id,
+        organizationId: (profile.organization_id as string | null) ?? null,
+        isPlatformAdmin: profile.organization_id == null,
+    };
 }

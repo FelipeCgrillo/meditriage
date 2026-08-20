@@ -1,10 +1,10 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useChat } from 'ai/react';
 import { Send, AlertTriangle, ShieldCheck, Bot, Loader2, CheckCircle2, RefreshCw, CalendarClock, Stethoscope } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
-import { supabase, isSupabaseConfigured } from '@/lib/supabase/client';
 import { generateAnonymousCode } from '@/lib/utils/anonymousCode';
 import { extractJSON } from '@/lib/utils/validation';
 import { dispositionTitle, type Disposition } from '@/lib/triage/disposition';
@@ -28,6 +28,15 @@ interface TriageResponse {
 }
 
 export default function ChatInterface() {
+    const searchParams = useSearchParams();
+    const orgSlug = (searchParams?.get('org') ?? '').toLowerCase();
+
+    // Estado de validación del tenant (PRD I1 CA-04/CA-05). Empieza como
+    // 'loading' y se resuelve a 'valid' o 'invalid' al montar. Todo el flujo
+    // del paciente se bloquea hasta tener una organización activa.
+    const [orgState, setOrgState] = useState<'loading' | 'valid' | 'invalid'>('loading');
+    const [orgName, setOrgName] = useState<string | null>(null);
+
     const [consentAccepted, setConsentAccepted] = useState(false);
     const [showEmergencyAlert, setShowEmergencyAlert] = useState(false);
     const [isFinished, setIsFinished] = useState(false);
@@ -102,34 +111,30 @@ export default function ChatInterface() {
                         .map((m) => m.content)
                         .join('\n');
 
-                    if (isSupabaseConfigured) {
-                        try {
-                            const { error: dbError } = await supabase
-                                .from('clinical_records')
-                                .insert({
-                                    patient_consent: true,
-                                    symptoms_text: userMessages,
-                                    ai_response: json as any,
-                                    esi_level: json.esi_level,
-                                    nurse_validated: false,
-                                    anonymous_code: code,
-                                    // CMD estructurado auto-reportado extraído por el LLM (migración 009).
-                                    cmd_features: (json.extracted_features ?? null) as any,
-                                    // Vía de atención derivada del ESI (migración 011).
-                                    disposition: json.disposition ?? null,
-                                } as any);
-
-                            if (dbError) {
-                                console.error('Error saving record:', dbError);
-                                // Do not block the UI — the user still gets
-                                // their code on screen; persistence is best
-                                // effort here.
-                            }
-                        } catch (dbCatch) {
-                            console.error('Unexpected error persisting clinical record:', dbCatch);
+                    // Persistencia server-side (PRD I1). El endpoint valida
+                    // el slug de la organización antes de insertar y usa
+                    // service_role para respetar la RLS estricta.
+                    try {
+                        const res = await fetch('/api/patient/record', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                org_slug: orgSlug,
+                                anonymous_code: code,
+                                symptoms_text: userMessages,
+                                ai_response: json,
+                                esi_level: json.esi_level,
+                                disposition: json.disposition ?? null,
+                                cmd_features: json.extracted_features ?? null,
+                            }),
+                        });
+                        if (!res.ok) {
+                            console.error('[triage] persist failed, status', res.status);
+                            // No bloqueamos la UI: el paciente ya tiene su
+                            // código en pantalla. La persistencia es best-effort.
                         }
-                    } else {
-                        console.warn('[triage] Supabase not configured; skipping clinical record persistence');
+                    } catch (dbCatch) {
+                        console.error('Unexpected error persisting clinical record:', dbCatch);
                     }
 
                     // Set the code BEFORE marking finished so the
@@ -147,6 +152,36 @@ export default function ChatInterface() {
             }
         },
     });
+
+    // Validación del tenant al montar. Ver PRD I1 RF-07 y CA-05: si el
+    // slug es inválido o inactivo mostramos un mensaje genérico y no
+    // dejamos avanzar el flujo.
+    useEffect(() => {
+        let cancelled = false;
+        async function validateOrg() {
+            if (!orgSlug) {
+                if (!cancelled) setOrgState('invalid');
+                return;
+            }
+            try {
+                const res = await fetch(`/api/patient/organization?slug=${encodeURIComponent(orgSlug)}`);
+                const json = await res.json();
+                if (cancelled) return;
+                if (json?.valid) {
+                    setOrgName(json.name ?? null);
+                    setOrgState('valid');
+                } else {
+                    setOrgState('invalid');
+                }
+            } catch {
+                if (!cancelled) setOrgState('invalid');
+            }
+        }
+        validateOrg();
+        return () => {
+            cancelled = true;
+        };
+    }, [orgSlug]);
 
     // Keep messagesRef in sync with the live messages array on every render.
     // This is the canonical pattern for accessing fresh state inside a
@@ -169,6 +204,37 @@ export default function ChatInterface() {
         // Send the selected option as the next user message
         append({ role: 'user', content: option });
     };
+
+    // Bloqueo por tenant: mientras validamos el slug, mostramos spinner.
+    // Si es inválido, mensaje genérico (PRD I1 CA-05). Solo tras 'valid'
+    // dejamos pasar al consentimiento y al chat.
+    if (orgState === 'loading') {
+        return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+                <div className="bg-white rounded-2xl shadow-xl px-6 py-8 flex items-center gap-3">
+                    <Loader2 className="w-5 h-5 animate-spin text-medical-primary" />
+                    <p className="text-gray-700 font-medium">Validando enlace...</p>
+                </div>
+            </div>
+        );
+    }
+
+    if (orgState === 'invalid') {
+        return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+                <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden border border-gray-100">
+                    <div className="bg-red-600 p-6 text-white text-center">
+                        <AlertTriangle className="w-10 h-10 mx-auto mb-2" />
+                        <h2 className="text-xl font-bold">Enlace no válido</h2>
+                    </div>
+                    <div className="p-6 text-gray-700 leading-relaxed">
+                        <p>Este enlace no es válido, consulte con su CESFAM.</p>
+                        <p className="mt-3 text-sm text-gray-500">Si tiene una emergencia, llame al 131.</p>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     if (!consentAccepted) {
         return (

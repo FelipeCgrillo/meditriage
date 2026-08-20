@@ -1,11 +1,14 @@
 'use client';
 
+import { Suspense } from 'react';
 import ChatInterface from '@/components/triage/ChatInterface';
 
 export default function PatientChatPage() {
     return (
         <main className="min-h-screen bg-slate-50 py-8 px-4">
-            <ChatInterface />
+            <Suspense fallback={null}>
+                <ChatInterface />
+            </Suspense>
         </main>
     );
 }
