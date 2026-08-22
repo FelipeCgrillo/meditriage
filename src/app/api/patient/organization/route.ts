@@ -1,9 +1,9 @@
 /**
  * GET /api/patient/organization?slug=<slug>
  *
- * Valida que el slug corresponda a una organizaci\u00f3n activa y devuelve
+ * Valida que el slug corresponda a una organización activa y devuelve
  * su `name` para poder mostrarlo al paciente. No expone el `id` interno
- * ni ning\u00fan otro campo (defensa en profundidad, CA-05).
+ * ni ningún otro campo (defensa en profundidad, CA-05).
  */
 
 import { NextResponse, type NextRequest } from 'next/server';

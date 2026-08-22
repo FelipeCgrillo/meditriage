@@ -1,10 +1,10 @@
 'use client';
 
 /**
- * P\u00e1gina de administraci\u00f3n de organizaciones (PRD I1 RF-02).
+ * Página de administración de organizaciones (PRD I1 RF-02).
  *
  * Un admin de plataforma la usa para crear tenants nuevos. El admin de
- * tenant solo ve su propia organizaci\u00f3n. La UI es minimalista a prop\u00f3sito:
+ * tenant solo ve su propia organización. La UI es minimalista a propósito:
  * el objetivo del I1 es habilitar el piloto controlado, no un panel completo.
  */
 
@@ -59,7 +59,7 @@ export default function OrganizationsAdminPage() {
             });
             const json = await res.json();
             if (!res.ok) throw new Error(json?.error || 'No se pudo crear.');
-            setOk(`Organizaci\u00f3n creada: ${json.organization.name}`);
+            setOk(`Organización creada: ${json.organization.name}`);
             setSlug('');
             setName('');
             await load();
@@ -74,14 +74,15 @@ export default function OrganizationsAdminPage() {
         <main className="min-h-screen bg-slate-50 p-8">
             <div className="max-w-3xl mx-auto space-y-8">
                 <header>
-                    <h1 className="text-2xl font-bold text-gray-900">Organizaciones</h1>
+                    <a href="/admin" className="text-sm text-indigo-600 hover:underline">← Volver al panel de administración</a>
+                    <h1 className="text-2xl font-bold text-gray-900 mt-2">Organizaciones</h1>
                     <p className="text-sm text-gray-600 mt-1">
                         Solo el administrador de plataforma puede crear organizaciones nuevas.
                     </p>
                 </header>
 
                 <section className="bg-white rounded-2xl shadow p-6">
-                    <h2 className="font-semibold text-gray-900 mb-4">Crear organizaci\u00f3n</h2>
+                    <h2 className="font-semibold text-gray-900 mb-4">Crear organización</h2>
                     <form onSubmit={onCreate} className="grid grid-cols-1 md:grid-cols-3 gap-3">
                         <div className="md:col-span-1">
                             <label className="block text-sm font-medium text-gray-700 mb-1">Slug</label>
@@ -127,7 +128,7 @@ export default function OrganizationsAdminPage() {
                     {loading ? (
                         <p className="text-sm text-gray-500">Cargando...</p>
                     ) : orgs.length === 0 ? (
-                        <p className="text-sm text-gray-500">Todav\u00eda no hay organizaciones.</p>
+                        <p className="text-sm text-gray-500">Todavía no hay organizaciones.</p>
                     ) : (
                         <ul className="divide-y divide-gray-100">
                             {orgs.map((o) => (

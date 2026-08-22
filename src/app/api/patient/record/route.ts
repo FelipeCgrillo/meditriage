@@ -1,16 +1,16 @@
 /**
  * POST /api/patient/record
  *
- * Persiste el registro cl\u00ednico del paciente an\u00f3nimo al cierre de la
- * conversaci\u00f3n. El API valida el slug de organizaci\u00f3n server-side (no
- * conf\u00eda en el cliente) y usa `service_role` para insertar respetando la
- * RLS estricta introducida por la migraci\u00f3n 012.
+ * Persiste el registro clínico del paciente anónimo al cierre de la
+ * conversación. El API valida el slug de organización server-side (no
+ * confía en el cliente) y usa `service_role` para insertar respetando la
+ * RLS estricta introducida por la migración 012.
  *
  * Contexto PRD I1 (RF-03, RF-06, RF-07, CA-04, CA-05):
  *   - El link del paciente incluye `?org=<slug>`.
  *   - El chat entrega ese slug al server junto con el resultado del triaje.
- *   - Si el slug no resuelve a una organizaci\u00f3n activa, respondemos 400
- *     con mensaje gen\u00e9rico y NO creamos ning\u00fan registro.
+ *   - Si el slug no resuelve a una organización activa, respondemos 400
+ *     con mensaje genérico y NO creamos ningún registro.
  */
 
 import { NextResponse, type NextRequest } from 'next/server';
@@ -18,7 +18,7 @@ import { z } from 'zod';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { resolveOrganizationIdBySlug } from '@/lib/organizations';
 
-/** Payload m\u00ednimo necesario para persistir un caso de \u00e9xito. */
+/** Payload mínimo necesario para persistir un caso de éxito. */
 const BodySchema = z.object({
     org_slug: z.string().min(3).max(60),
     anonymous_code: z.string().min(3).max(20),
@@ -41,18 +41,18 @@ export async function POST(req: NextRequest) {
         body = BodySchema.parse(await req.json());
     } catch {
         return NextResponse.json(
-            { error: 'invalid_payload', message: 'El cuerpo de la solicitud no es v\u00e1lido.' },
+            { error: 'invalid_payload', message: 'El cuerpo de la solicitud no es válido.' },
             { status: 400 },
         );
     }
 
     const organizationId = await resolveOrganizationIdBySlug(body.org_slug);
     if (!organizationId) {
-        // Mensaje gen\u00e9rico: no confirmamos si el slug existe o no (CA-05).
+        // Mensaje genérico: no confirmamos si el slug existe o no (CA-05).
         return NextResponse.json(
             {
                 error: 'invalid_organization',
-                message: 'Este enlace no es v\u00e1lido, consulte con su CESFAM.',
+                message: 'Este enlace no es válido, consulte con su CESFAM.',
             },
             { status: 400 },
         );
@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
     } as any);
 
     if (error) {
-        // No filtramos detalle interno; s\u00ed lo dejamos en el log del server.
+        // No filtramos detalle interno; sí lo dejamos en el log del server.
         console.error('[patient/record] insert error:', error);
         return NextResponse.json(
             { error: 'persist_failed', message: 'No se pudo guardar el registro.' },

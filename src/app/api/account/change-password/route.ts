@@ -1,10 +1,10 @@
 /**
  * POST /api/account/change-password
  *
- * Cambia la contrase\u00f1a del usuario autenticado y baja el flag
- * `must_change_password` en su perfil. Verifica primero la contrase\u00f1a
+ * Cambia la contraseña del usuario autenticado y baja el flag
+ * `must_change_password` en su perfil. Verifica primero la contraseña
  * actual autenticando de nuevo contra Supabase para evitar que un atacante
- * con acceso a la sesi\u00f3n cambie la clave sin conocerla.
+ * con acceso a la sesión cambie la clave sin conocerla.
  *
  * PRD I1 CA-14.
  */
@@ -23,13 +23,13 @@ export async function POST(req: NextRequest) {
 
     if (!currentPassword || !newPassword || newPassword.length < 8) {
         return NextResponse.json(
-            { error: 'Contrase\u00f1a actual y nueva son obligatorias; la nueva requiere al menos 8 caracteres.' },
+            { error: 'Contraseña actual y nueva son obligatorias; la nueva requiere al menos 8 caracteres.' },
             { status: 400 },
         );
     }
     if (currentPassword === newPassword) {
         return NextResponse.json(
-            { error: 'La nueva contrase\u00f1a debe ser distinta de la actual.' },
+            { error: 'La nueva contraseña debe ser distinta de la actual.' },
             { status: 400 },
         );
     }
@@ -43,12 +43,12 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'No autenticado.' }, { status: 401 });
     }
 
-    // Reautenticaci\u00f3n independiente para verificar la contrase\u00f1a actual.
-    // Usamos un cliente separado para no interferir con la sesi\u00f3n del SSR.
+    // Reautenticación independiente para verificar la contraseña actual.
+    // Usamos un cliente separado para no interferir con la sesión del SSR.
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     if (!url || !anon) {
-        return NextResponse.json({ error: 'Configuraci\u00f3n incompleta.' }, { status: 500 });
+        return NextResponse.json({ error: 'Configuración incompleta.' }, { status: 500 });
     }
     const verify = createClient(url, anon, { auth: { persistSession: false } });
     const { error: signInError } = await verify.auth.signInWithPassword({
@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
     });
     if (signInError) {
         return NextResponse.json(
-            { error: 'La contrase\u00f1a actual es incorrecta.' },
+            { error: 'La contraseña actual es incorrecta.' },
             { status: 400 },
         );
     }
@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
         .update({ must_change_password: false })
         .eq('id', user.id);
     if (flagError) {
-        // La contrase\u00f1a ya se cambi\u00f3; loggeamos pero devolvemos ok.
+        // La contraseña ya se cambió; loggeamos pero devolvemos ok.
         console.error('[change-password] no se pudo bajar el flag:', flagError);
     }
 

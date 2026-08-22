@@ -143,6 +143,11 @@ function TabButton({
 function AccessTab() {
     const cards = [
         {
+            href: '/admin/organizations',
+            title: 'Organizaciones',
+            desc: 'Crear y gestionar organizaciones (solo admin de plataforma).',
+        },
+        {
             href: '/resultados',
             title: 'Panel de Resultados',
             desc: 'Métricas del estudio, Kappa y matriz de confusión (investigador).',

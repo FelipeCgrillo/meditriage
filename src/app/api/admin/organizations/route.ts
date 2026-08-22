@@ -4,7 +4,7 @@
  *
  * Alta y lectura de organizaciones (tenants). Solo el admin de plataforma
  * (rol admin sin `organization_id`) puede crear organizaciones nuevas.
- * Un admin de tenant solo puede leer su propia organizaci\u00f3n.
+ * Un admin de tenant solo puede leer su propia organización.
  *
  * PRD I1 RF-02, CA-01, CA-07.
  */
@@ -43,13 +43,13 @@ export async function POST(req: NextRequest) {
         !SLUG_RE.test(cleanSlug)
     ) {
         return NextResponse.json(
-            { error: 'Slug inv\u00e1lido: usar solo min\u00fasculas, n\u00fameros y guiones (3-60 caracteres).' },
+            { error: 'Slug inválido: usar solo minúsculas, números y guiones (3-60 caracteres).' },
             { status: 400 },
         );
     }
     if (!cleanName || cleanName.length > 200) {
         return NextResponse.json(
-            { error: 'Nombre inv\u00e1lido (1-200 caracteres).' },
+            { error: 'Nombre inválido (1-200 caracteres).' },
             { status: 400 },
         );
     }
@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
     if (error) {
         // 23505 = unique_violation
         if ((error as { code?: string }).code === '23505') {
-            return NextResponse.json({ error: 'Ese slug ya est\u00e1 en uso.' }, { status: 409 });
+            return NextResponse.json({ error: 'Ese slug ya está en uso.' }, { status: 409 });
         }
         return NextResponse.json({ error: error.message }, { status: 500 });
     }
