@@ -25,6 +25,7 @@ export default defineConfig({
             '__tests__/safety/fhir-observation.test.ts',
             '__tests__/safety/disposition-mapping.test.ts',
             '__tests__/safety/multitenancy.test.ts',
+            '__tests__/safety/ux-increment.test.ts',
             '__tests__/dau/dau-parser.test.ts',
             '__tests__/dau/dau-mapping.test.ts',
             '__tests__/dau/dau-summary.test.ts',

@@ -88,7 +88,7 @@ export default function LandingPage() {
                                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
                                 </svg>
-                                Soy Enfermera
+                                Personal de Enfermería
                                 <svg className="w-5 h-5 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
                                 </svg>
@@ -169,7 +169,7 @@ export default function LandingPage() {
             </section>
 
             {/* Benefits Section */}
-            <section id="beneficios" className="relative py-24 bg-gradient-to-b from-slate-900 to-slate-800">
+            <section id="beneficios" className="relative py-24 bg-slate-900">
                 <div className="container mx-auto px-6">
                     <div className="text-center mb-16">
                         <h2 className="text-3xl md:text-4xl font-bold text-white mb-4">
@@ -181,74 +181,28 @@ export default function LandingPage() {
                     </div>
 
                     <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 max-w-6xl mx-auto">
-                        <div className="bg-gradient-to-br from-blue-500/10 to-blue-600/5 border border-blue-500/20 rounded-2xl p-6 text-center">
-                            <div className="text-4xl font-bold text-blue-400 mb-2">~3s</div>
-                            <div className="text-gray-300 font-medium">Tiempo de Análisis</div>
-                            <div className="text-gray-500 text-sm mt-1">IA en tiempo real</div>
-                        </div>
-
                         <div className="bg-gradient-to-br from-emerald-500/10 to-emerald-600/5 border border-emerald-500/20 rounded-2xl p-6 text-center">
                             <div className="text-4xl font-bold text-emerald-400 mb-2">5</div>
                             <div className="text-gray-300 font-medium">Niveles ESI</div>
-                            <div className="text-gray-500 text-sm mt-1">Clasificación estándar</div>
+                            <div className="text-gray-500 text-sm mt-1">Protocolo estándar internacional</div>
+                        </div>
+
+                        <div className="bg-gradient-to-br from-blue-500/10 to-blue-600/5 border border-blue-500/20 rounded-2xl p-6 text-center">
+                            <div className="text-4xl font-bold text-blue-400 mb-2">IA + RN</div>
+                            <div className="text-gray-300 font-medium">Doble Evaluación</div>
+                            <div className="text-gray-500 text-sm mt-1">Cada caso revisado por enfermería</div>
                         </div>
 
                         <div className="bg-gradient-to-br from-purple-500/10 to-purple-600/5 border border-purple-500/20 rounded-2xl p-6 text-center">
-                            <div className="text-4xl font-bold text-purple-400 mb-2">24/7</div>
-                            <div className="text-gray-300 font-medium">Disponibilidad</div>
-                            <div className="text-gray-500 text-sm mt-1">Sin interrupciones</div>
+                            <div className="text-4xl font-bold text-purple-400 mb-2">Anónimo</div>
+                            <div className="text-gray-300 font-medium">Sin Datos Personales</div>
+                            <div className="text-gray-500 text-sm mt-1">Solo un código de seguimiento</div>
                         </div>
 
                         <div className="bg-gradient-to-br from-amber-500/10 to-amber-600/5 border border-amber-500/20 rounded-2xl p-6 text-center">
-                            <div className="text-4xl font-bold text-amber-400 mb-2">100%</div>
-                            <div className="text-gray-300 font-medium">Trazabilidad</div>
-                            <div className="text-gray-500 text-sm mt-1">FHIR compliant</div>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            {/* CTA Section */}
-            <section className="relative py-24 bg-gradient-to-b from-slate-800 to-slate-900">
-                <div className="container mx-auto px-6">
-                    <div className="max-w-3xl mx-auto text-center">
-                        <h2 className="text-3xl md:text-4xl font-bold text-white mb-6">
-                            Comienza Ahora
-                        </h2>
-                        <p className="text-gray-400 mb-10 text-lg">
-                            Selecciona tu rol para acceder al sistema de triage inteligente
-                        </p>
-
-                        <div className="flex flex-col sm:flex-row gap-4 justify-center flex-wrap">
-                            <Link
-                                href="/paciente"
-                                className="group inline-flex items-center justify-center gap-3 bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white font-semibold px-10 py-5 rounded-2xl transition-all duration-300 shadow-lg shadow-blue-500/30 hover:shadow-blue-500/50 hover:scale-105 text-lg"
-                            >
-                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                                </svg>
-                                Acceder como Paciente
-                            </Link>
-
-                            <Link
-                                href="/login/nurse"
-                                className="group inline-flex items-center justify-center gap-3 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white font-semibold px-10 py-5 rounded-2xl transition-all duration-300 shadow-lg shadow-emerald-500/30 hover:shadow-emerald-500/50 hover:scale-105 text-lg"
-                            >
-                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                                </svg>
-                                Acceder como Enfermera
-                            </Link>
-
-                            <Link
-                                href="/login/resultados"
-                                className="group inline-flex items-center justify-center gap-3 bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white font-semibold px-10 py-5 rounded-2xl transition-all duration-300 shadow-lg shadow-indigo-500/30 hover:shadow-indigo-500/50 hover:scale-105 text-lg"
-                            >
-                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                                </svg>
-                                Acceso Admin
-                            </Link>
+                            <div className="text-4xl font-bold text-amber-400 mb-2">FHIR</div>
+                            <div className="text-gray-300 font-medium">Registro Estructurado</div>
+                            <div className="text-gray-500 text-sm mt-1">Basado en el estándar HL7 FHIR</div>
                         </div>
                     </div>
                 </div>
