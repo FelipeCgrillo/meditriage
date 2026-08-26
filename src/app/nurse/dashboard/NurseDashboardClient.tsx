@@ -300,7 +300,7 @@ export default function NurseDashboardClient({
                         <button
                             onClick={handleLogout}
                             disabled={logoutLoading}
-                            className="px-3 py-2 text-sm bg-red-50 hover:bg-red-100 text-red-700 rounded-lg transition-colors disabled:opacity-50"
+                            className="px-4 py-2 text-sm font-semibold border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg transition-colors disabled:opacity-50"
                         >
                             Cerrar sesión
                         </button>
@@ -316,14 +316,15 @@ export default function NurseDashboardClient({
                 )}
 
                 {/* Aviso metodológico — recuerda al usuario el principio del panel */}
-                <div className="bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3 mb-6 flex items-start gap-3">
-                    <svg className="w-5 h-5 text-indigo-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                <div className="bg-white border border-gray-200 rounded-xl px-4 py-3 mb-6 flex items-start gap-3">
+                    <svg className="w-5 h-5 text-gray-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                        <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24" />
+                        <path d="M1 1l22 22" />
                     </svg>
-                    <p className="text-sm text-indigo-900 leading-snug">
-                        <span className="font-semibold">Evaluación independiente:</span> clasifique cada caso según
-                        su criterio clínico. La categoría ESI propuesta por la IA permanece oculta hasta que
-                        usted asigne la suya, para garantizar la independencia metodológica del estudio.
+                    <p className="text-sm text-gray-700 leading-snug">
+                        <span className="font-semibold text-gray-900">Evaluación independiente:</span> clasifique cada caso según
+                        su criterio clínico. El ESI de la IA se revela al guardar su clasificación,
+                        para garantizar la independencia metodológica del estudio.
                     </p>
                 </div>
 
@@ -354,17 +355,17 @@ export default function NurseDashboardClient({
                     <div className="flex flex-wrap items-center gap-2">
                         <span className="text-sm font-medium text-gray-700 mr-2">Estado:</span>
                         {([
-                            ['all', 'Todos'],
-                            ['pending', 'Por clasificar'],
-                            ['classified', 'Clasificados'],
+                            ['all', `Todos · ${stats.total}`],
+                            ['pending', `Por clasificar · ${stats.pending}`],
+                            ['classified', `Clasificados · ${stats.classified}`],
                         ] as const).map(([val, lbl]) => (
                             <button
                                 key={val}
                                 onClick={() => setFilterStatus(val)}
-                                className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                                className={`px-4 py-1.5 text-sm font-semibold rounded-full transition-colors ${
                                     filterStatus === val
                                         ? 'bg-emerald-600 text-white'
-                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                        : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
                                 }`}
                             >
                                 {lbl}
@@ -460,14 +461,14 @@ function RecordCard({
                                 {classified && (
                                     <>
                                         <span
-                                            className={`text-xs px-2 py-0.5 rounded-full ${esiColors[nurseEsi!].bg} ${esiColors[nurseEsi!].text} font-medium`}
+                                            className={`text-xs px-2 py-0.5 rounded-full ${esiColors[nurseEsi!].bg} ${esiColors[nurseEsi!].text} font-bold`}
                                         >
-                                            Enfermera: ESI {nurseEsi}
+                                            ESI {nurseEsi} · Enfermería
                                         </span>
                                         <span
-                                            className={`text-xs px-2 py-0.5 rounded-full ${esiColors[aiEsi].bg} ${esiColors[aiEsi].text} font-medium`}
+                                            className={`text-xs px-2 py-0.5 rounded-full ${esiColors[aiEsi].bg} ${esiColors[aiEsi].text} font-bold`}
                                         >
-                                            IA: ESI {aiEsi}
+                                            ESI {aiEsi} · IA
                                         </span>
                                         {record.disposition && (
                                             <DispositionChip disposition={record.disposition} />
@@ -571,27 +572,30 @@ function RecordCard({
 
                         {/* Si NO está clasificado — flujo de clasificación ciega */}
                         {!classified && (
-                            <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
-                                <h3 className="text-sm font-semibold text-indigo-900 mb-1">
+                            <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
+                                <h3 className="text-sm font-bold text-gray-900 mb-1">
                                     Su clasificación ESI
                                 </h3>
-                                <p className="text-xs text-indigo-700 mb-3">
-                                    Asigne el nivel ESI según su criterio clínico. La categoría propuesta
+                                <p className="text-xs text-gray-600 mb-3">
+                                    Asigne el nivel ESI según su criterio clínico. El ESI propuesto
                                     por la IA se revelará después de su clasificación.
                                 </p>
-                                <div className="flex items-center gap-2 flex-wrap">
+                                <div className="flex items-center gap-2 md:gap-3 flex-wrap">
                                     {[1, 2, 3, 4, 5].map((lvl) => (
                                         <button
                                             key={lvl}
                                             onClick={() => setSelectedEsi(lvl)}
-                                            className={`w-12 h-12 rounded-md font-bold text-lg transition-colors ${
+                                            className={`w-[76px] h-16 rounded-xl border-2 transition-all flex flex-col items-center justify-center gap-0.5 ${
                                                 selectedEsi === lvl
-                                                    ? `${esiColors[lvl].bg} ${esiColors[lvl].text} ring-2 ring-offset-1 ring-indigo-500`
-                                                    : 'bg-white border border-gray-200 text-gray-700 hover:bg-gray-50'
+                                                    ? `${esiColors[lvl].bg} ${esiColors[lvl].text} ${esiColors[lvl].border} ring-2 ring-offset-1 ring-emerald-500 shadow-md`
+                                                    : `bg-white ${esiColors[lvl].border} ${esiColors[lvl].text} hover:shadow-sm`
                                             }`}
                                             aria-label={`ESI ${lvl} — ${esiColors[lvl].label}`}
                                         >
-                                            {lvl}
+                                            <span className="text-lg font-extrabold leading-none">{lvl}</span>
+                                            <span className="text-[10px] font-semibold leading-none">
+                                                {esiColors[lvl].label}
+                                            </span>
                                         </button>
                                     ))}
                                     <button
@@ -601,13 +605,13 @@ function RecordCard({
                                             }
                                         }}
                                         disabled={selectedEsi === null}
-                                        className="ml-auto px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                        className="ml-auto px-5 py-3 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                                     >
-                                        Clasificar
+                                        Guardar clasificación
                                     </button>
                                 </div>
                                 {selectedEsi !== null && (
-                                    <p className="text-xs text-indigo-800 mt-3">
+                                    <p className="text-xs text-gray-700 mt-3">
                                         Seleccionado:{' '}
                                         <span className="font-semibold">
                                             ESI {selectedEsi} — {esiColors[selectedEsi].label}

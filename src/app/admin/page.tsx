@@ -45,6 +45,14 @@ interface ClinicalRecordRow {
 
 type Tab = 'usuarios' | 'dau' | 'clinicos' | 'accesos';
 
+// Chips de rol con el color de cada área (lienzo renovado): esmeralda
+// para enfermería, azul para investigación, índigo para administración.
+const ROLE_CHIP: Record<Role, string> = {
+    nurse: 'bg-emerald-100 text-emerald-700',
+    researcher: 'bg-blue-100 text-blue-700',
+    admin: 'bg-indigo-100 text-indigo-700',
+};
+
 // =============================================================================
 // PÁGINA ADMIN
 // =============================================================================
@@ -270,7 +278,7 @@ function UsersTab() {
             {/* Crear usuario */}
             <section className="rounded-lg border border-gray-200 bg-white p-5">
                 <h2 className="mb-4 text-lg font-semibold text-gray-900">Crear usuario</h2>
-                <form onSubmit={createUser} className="grid gap-4 sm:grid-cols-2">
+                <form onSubmit={createUser} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                     <label className="text-sm">
                         <span className="mb-1 block font-medium text-gray-700">Correo</span>
                         <input
@@ -316,7 +324,7 @@ function UsersTab() {
                             <option value="admin">Administrador (admin)</option>
                         </select>
                     </label>
-                    <div className="sm:col-span-2">
+                    <div className="sm:col-span-2 lg:col-span-4">
                         <button
                             type="submit"
                             disabled={submitting}
@@ -363,7 +371,7 @@ function UsersTab() {
                                         <td className="px-3 py-2 font-medium text-gray-900">{u.email}</td>
                                         <td className="px-3 py-2 text-gray-600">{u.full_name || '—'}</td>
                                         <td className="px-3 py-2">
-                                            <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">
+                                            <span className={`rounded-full px-3 py-0.5 text-xs font-bold ${ROLE_CHIP[u.role] ?? 'bg-gray-100 text-gray-700'}`}>
                                                 {u.role}
                                             </span>
                                         </td>

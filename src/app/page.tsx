@@ -14,11 +14,14 @@ export default function LandingPage() {
         <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900">
             {/* Hero Section */}
             <header className="relative overflow-hidden">
-                {/* Animated background elements */}
-                <div className="absolute inset-0 overflow-hidden">
-                    <div className="absolute -top-40 -right-40 w-80 h-80 bg-blue-500/20 rounded-full blur-3xl animate-pulse" />
-                    <div className="absolute top-60 -left-40 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl animate-pulse delay-1000" />
-                </div>
+                {/* Fondo del hero — brillos radiales estáticos (lienzo renovado) */}
+                <div
+                    className="absolute inset-0"
+                    style={{
+                        background:
+                            'radial-gradient(720px 420px at 78% -10%, rgba(59, 130, 246, 0.22), transparent 70%), radial-gradient(640px 420px at 12% 110%, rgba(16, 185, 129, 0.14), transparent 70%)',
+                    }}
+                />
 
                 <nav className="relative z-10 container mx-auto px-6 py-6">
                     <div className="flex items-center justify-between">

@@ -3,9 +3,11 @@
 /**
  * TriageChatLegacy — restored "old" chat UI for /paciente.
  *
- * Visual design preserved from commit 36d8da4 (pre-restructure):
- *   - Header "Chat de Triage ESI" + "Asistente médico virtual" (teal dot)
- *   - Violet/indigo gradient bubbles, WhatsApp-style layout
+ * Diseño visual renovado (lienzo "MediTriage Renovado", identidad
+ * esmeralda del área clínica):
+ *   - Header esmeralda con el nombre del CESFAM y subtítulo "Asistente
+ *     de orientación · Anónimo"
+ *   - Burbujas: paciente esmeralda sólido, asistente blanco con borde
  *   - Spanish consent flow with "Sí, autorizo" / "No autorizo"
  *   - Demographic capture via chat options (gender + age group)
  *   - Quick-reply chips for AI follow-ups
@@ -563,9 +565,9 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
     // el link no trae un slug válido de organización activa.
     if (orgState === 'loading') {
         return (
-            <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-b from-indigo-50/80 via-white to-white p-6">
+            <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-emerald-50 via-white to-teal-50 p-6">
                 <div className="bg-white rounded-2xl shadow-xl px-6 py-8 flex items-center gap-3">
-                    <div className="w-5 h-5 rounded-full border-2 border-indigo-600 border-t-transparent animate-spin" />
+                    <div className="w-5 h-5 rounded-full border-2 border-emerald-600 border-t-transparent animate-spin" />
                     <p className="text-gray-700 font-medium">Validando enlace...</p>
                 </div>
             </div>
@@ -576,19 +578,19 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
     // (PRD mejoras UX RF-01, CA-01).
     if (orgState === 'select') {
         return (
-            <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-b from-indigo-50/80 via-white to-white p-6">
+            <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-emerald-50 via-white to-teal-50 p-6">
                 <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden border border-gray-100">
-                    <div className="bg-gradient-to-r from-violet-600 to-indigo-600 p-6 text-white text-center">
+                    <div className="bg-emerald-600 p-6 text-white text-center">
                         <Building2 className="w-10 h-10 mx-auto mb-2" aria-hidden="true" />
                         <h2 className="text-xl font-bold">Seleccione su CESFAM</h2>
-                        <p className="text-sm text-indigo-100 mt-1">
+                        <p className="text-sm text-emerald-100 mt-1">
                             Elija el centro de salud donde se atiende para comenzar.
                         </p>
                     </div>
                     <div className="p-6">
                         {orgOptions === null ? (
                             <div className="flex items-center justify-center gap-3 py-6">
-                                <div className="w-5 h-5 rounded-full border-2 border-indigo-600 border-t-transparent animate-spin" />
+                                <div className="w-5 h-5 rounded-full border-2 border-emerald-600 border-t-transparent animate-spin" />
                                 <p className="text-gray-700 font-medium">Cargando centros...</p>
                             </div>
                         ) : orgOptions.length === 0 ? (
@@ -612,7 +614,7 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
                                                     `/paciente?org=${encodeURIComponent(org.slug)}`,
                                                 )
                                             }
-                                            className="w-full text-left px-4 py-3 rounded-xl border border-slate-200 bg-white hover:border-indigo-500 hover:bg-indigo-50 text-slate-800 font-medium transition-colors"
+                                            className="w-full text-left px-4 py-3 rounded-xl border border-slate-200 bg-white hover:border-emerald-500 hover:bg-emerald-50 text-slate-800 font-medium transition-colors"
                                         >
                                             {org.name}
                                         </button>
@@ -628,7 +630,7 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
 
     if (orgState === 'invalid') {
         return (
-            <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-b from-indigo-50/80 via-white to-white p-6">
+            <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-emerald-50 via-white to-teal-50 p-6">
                 <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden border border-gray-100">
                     <div className="bg-red-600 p-6 text-white text-center">
                         <AlertTriangle className="w-10 h-10 mx-auto mb-2" />
@@ -655,24 +657,19 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
     }
 
     return (
-        <div className="flex flex-col h-screen md:h-[calc(100vh-4rem)] w-full md:max-w-5xl md:mx-auto bg-gradient-to-b from-indigo-50/80 via-white to-white md:shadow-2xl md:rounded-t-2xl overflow-hidden">
-            {/* Header — old design preserved */}
-            <header className="bg-white/80 backdrop-blur-sm shadow-sm h-16 md:h-18 flex items-center px-4 md:px-6 flex-shrink-0 border-b border-indigo-100/30">
+        <div className="flex flex-col h-screen md:h-[calc(100vh-4rem)] w-full md:max-w-5xl md:mx-auto bg-slate-50 md:shadow-2xl md:rounded-t-2xl overflow-hidden">
+            {/* Header — identidad esmeralda con el nombre del CESFAM */}
+            <header className="bg-emerald-600 h-16 md:h-18 flex items-center px-4 md:px-6 flex-shrink-0">
                 <div className="flex items-center gap-3 md:gap-4">
-                    <div className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-gradient-to-br from-violet-100 to-indigo-100 flex items-center justify-center">
-                        <Bot className="h-5 w-5 md:h-6 md:w-6 text-indigo-600" />
+                    <div className="w-10 h-10 md:w-11 md:h-11 rounded-xl bg-white/20 flex items-center justify-center">
+                        <Bot className="h-5 w-5 md:h-6 md:w-6 text-white" />
                     </div>
                     <div>
-                        <h1 className="text-gray-900 font-bold text-base md:text-lg tracking-tight">
-                            Orientación de urgencia
+                        <h1 className="text-white font-bold text-base md:text-lg tracking-tight">
+                            {orgName ?? 'Orientación de urgencia'}
                         </h1>
-                        <p className="text-gray-500 text-xs md:text-sm font-medium flex items-center gap-1.5">
-                            <span className="w-2 h-2 bg-teal-400 rounded-full" />
-                            <span>
-                                {orgName
-                                    ? `${orgName} · Asistente virtual`
-                                    : 'Asistente virtual'}
-                            </span>
+                        <p className="text-emerald-100 text-xs md:text-sm font-medium">
+                            Asistente de orientación · Anónimo
                         </p>
                     </div>
                 </div>
@@ -821,7 +818,7 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
                         if (isListening) stopSpeech();
                         handleSubmit(e, { options: { body: buildDemographicsBody() } });
                     }}
-                    className="flex items-end gap-2 md:gap-3 max-w-4xl mx-auto bg-white rounded-full shadow-xl shadow-indigo-100/50 px-2 md:px-3 py-2 border border-indigo-50"
+                    className="flex items-end gap-2 md:gap-3 max-w-4xl mx-auto bg-white rounded-full shadow-xl shadow-emerald-100/50 px-2 md:px-3 py-2 border border-gray-200"
                 >
                     <div className="flex-1 relative">
                         <input
@@ -834,7 +831,7 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
                                         : 'Describe tus síntomas aquí o usa el micrófono…'
                                     : 'Selecciona una opción arriba...'
                             }
-                            className="w-full rounded-full border-0 bg-gray-50 px-4 md:px-5 py-2.5 md:py-3 text-sm md:text-base focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 disabled:bg-gray-100 disabled:text-gray-400"
+                            className="w-full rounded-full border-0 bg-gray-100 px-4 md:px-5 py-2.5 md:py-3 text-sm md:text-base focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/30 disabled:bg-gray-100 disabled:text-gray-400"
                             disabled={inputDisabled}
                             maxLength={500}
                         />
@@ -875,7 +872,7 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
 
                     <button
                         type="submit"
-                        className="flex items-center justify-center flex-shrink-0 rounded-full h-10 w-10 md:h-11 md:w-11 bg-gradient-to-r from-violet-600 to-indigo-600 hover:shadow-lg hover:shadow-indigo-200 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                        className="flex items-center justify-center flex-shrink-0 rounded-full h-10 w-10 md:h-11 md:w-11 bg-emerald-600 hover:bg-emerald-700 hover:shadow-lg hover:shadow-emerald-200 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                         disabled={
                             inputDisabled || input.trim().length < MIN_INPUT_LENGTH
                         }
@@ -941,10 +938,10 @@ function Bubble({
                 }`}
             >
                 <div
-                    className={`rounded-[24px] px-4 py-3 md:px-5 md:py-3.5 ${
+                    className={`rounded-[18px] px-4 py-3 md:px-5 md:py-3.5 ${
                         isUser
-                            ? 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-indigo-200 rounded-br-sm'
-                            : 'bg-white text-slate-700 shadow-sm rounded-bl-sm'
+                            ? 'bg-emerald-600 text-white shadow-md shadow-emerald-200/60 rounded-br-sm'
+                            : 'bg-white text-gray-900 border border-gray-200 rounded-bl-sm'
                     }`}
                 >
                     <div className="text-sm md:text-base leading-relaxed">{lines}</div>
@@ -953,7 +950,7 @@ function Bubble({
                             className={`mt-2 text-[10px] px-2.5 py-0.5 rounded-full inline-block font-black uppercase tracking-wider ${
                                 esiLevel <= 2
                                     ? 'bg-red-100 text-red-700'
-                                    : 'bg-indigo-100 text-indigo-700'
+                                    : 'bg-emerald-100 text-emerald-700'
                             }`}
                         >
                             Criterio IA: ESI {esiLevel}
@@ -981,7 +978,7 @@ function Bubble({
                                             ? 'bg-emerald-50 text-emerald-700 ring-emerald-300 ring-2'
                                             : isDisabled
                                               ? 'bg-slate-50 text-slate-400 ring-slate-100 cursor-not-allowed opacity-60'
-                                              : 'text-slate-700 ring-slate-100 hover:ring-indigo-500 hover:text-indigo-600 hover:bg-indigo-50 hover:-translate-y-0.5'
+                                              : 'text-slate-700 ring-gray-200 hover:ring-emerald-500 hover:text-emerald-700 hover:bg-emerald-50 hover:-translate-y-0.5'
                                     }`}
                                 >
                                     {option}
@@ -1003,21 +1000,21 @@ function TypingIndicator() {
             aria-label="Analizando síntomas"
             className="flex justify-start animate-in fade-in-50 slide-in-from-bottom-2 duration-300"
         >
-            <div className="flex items-center gap-3 bg-white rounded-[24px] rounded-bl-sm px-4 md:px-5 py-3 md:py-3.5 shadow-sm">
+            <div className="flex items-center gap-3 bg-white border border-gray-200 rounded-[18px] rounded-bl-sm px-4 md:px-5 py-3 md:py-3.5">
                 <span className="text-xs md:text-sm text-slate-600 font-medium">
                     Escribiendo
                 </span>
                 <div className="flex gap-1.5">
                     <div
-                        className="w-2 h-2 md:w-2.5 md:h-2.5 bg-indigo-400 rounded-full animate-bounce"
+                        className="w-2 h-2 md:w-2.5 md:h-2.5 bg-emerald-400 rounded-full animate-bounce"
                         style={{ animationDelay: '0ms' }}
                     />
                     <div
-                        className="w-2 h-2 md:w-2.5 md:h-2.5 bg-violet-400 rounded-full animate-bounce"
+                        className="w-2 h-2 md:w-2.5 md:h-2.5 bg-emerald-500 rounded-full animate-bounce"
                         style={{ animationDelay: '150ms' }}
                     />
                     <div
-                        className="w-2 h-2 md:w-2.5 md:h-2.5 bg-indigo-400 rounded-full animate-bounce"
+                        className="w-2 h-2 md:w-2.5 md:h-2.5 bg-emerald-400 rounded-full animate-bounce"
                         style={{ animationDelay: '300ms' }}
                     />
                 </div>
@@ -1074,7 +1071,7 @@ function FinishedScreen({
     onRestart: () => void;
 }) {
     return (
-        <div className="min-h-screen bg-gradient-to-b from-indigo-50/80 via-white to-white flex items-center justify-center p-4">
+        <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-teal-50 flex items-center justify-center p-4">
             <div className="max-w-xl w-full bg-white rounded-[32px] shadow-2xl border border-slate-100 p-8 text-center space-y-6">
                 <div className="w-20 h-20 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto">
                     <Bot className="w-10 h-10" />
@@ -1091,13 +1088,13 @@ function FinishedScreen({
                     <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">
                         Código de Seguimiento
                     </p>
-                    <p className="text-5xl font-black text-indigo-600 tracking-tighter">
+                    <p className="text-5xl font-black text-emerald-600 tracking-tighter">
                         {code}
                     </p>
                 </div>
                 <button
                     onClick={onRestart}
-                    className="w-full py-4 rounded-xl font-bold bg-gradient-to-r from-violet-600 to-indigo-600 text-white hover:shadow-lg hover:shadow-indigo-200 transition-all"
+                    className="w-full py-4 rounded-xl font-bold bg-emerald-600 hover:bg-emerald-700 text-white hover:shadow-lg hover:shadow-emerald-200 transition-all"
                 >
                     Nueva Evaluación
                 </button>
