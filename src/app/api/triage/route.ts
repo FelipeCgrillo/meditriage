@@ -6,6 +6,11 @@ import { DEFAULT_ANTHROPIC_MODEL, getAnthropicModelId } from '@/lib/ai/config';
 import { FALLBACK_PAYLOAD, buildFallbackStreamResponse } from '@/lib/ai/safe-stream';
 import { TriageResponseSchema } from '@/lib/ai/schemas';
 import { applyRuleEngineSafeguard, buildDemographicsSystemMessage } from '@/lib/triage/classify';
+import {
+    buildAnsweredQuestionsMessage,
+    countRuleEngineFollowUps,
+    type AnsweredQuestion,
+} from '@/lib/triage/followUp';
 
 export const runtime = 'edge';
 
@@ -55,9 +60,10 @@ export async function POST(req: Request) {
             gender?: string | null;
             ageGroup?: string | null;
         };
-        const { messages, demographics } = body as {
+        const { messages, demographics, answered } = body as {
             messages?: ChatMessage[];
             demographics?: Demographics;
+            answered?: AnsweredQuestion[];
         };
 
         if (!messages || messages.length === 0) {
@@ -78,6 +84,14 @@ export async function POST(req: Request) {
             demographics?.gender,
             demographics?.ageGroup,
         );
+
+        // ---------------------------------------------------------------
+        // Memoria de repreguntas. Las respuestas por botón viajan como texto
+        // suelto ("Sangrado moderado") sin decir qué pregunta contestaban, lo
+        // que llevaba al modelo a repetir preguntas ya resueltas. El cliente
+        // manda el pareo pregunta/respuesta y se inyecta como contexto.
+        // ---------------------------------------------------------------
+        const answeredQuestionsMessage = buildAnsweredQuestionsMessage(answered);
 
         const lastUserMessage = messages[messages.length - 1];
         if (lastUserMessage.role !== 'user') {
@@ -104,18 +118,31 @@ export async function POST(req: Request) {
         const modelId = getAnthropicModelId();
 
         // ── Salida estructurada con Zod (streamObject) ──────────────────
+        const systemPrompt = [
+            TRIAGE_SYSTEM_PROMPT,
+            demographicsSystemMessage,
+            answeredQuestionsMessage,
+        ]
+            .filter((block) => block.trim().length > 0)
+            .join('\n\n');
+
         const result = await streamObject({
             model: anthropic(modelId),
             schema: TriageResponseSchema,
-            system: `${TRIAGE_SYSTEM_PROMPT}\n\n${demographicsSystemMessage}`,
+            system: systemPrompt,
             messages: sanitizedMessages,
             temperature: 0.1,
         });
 
+        // Cuántas veces el motor de reglas ya forzó tamizaje en esta
+        // conversación. Acota el ciclo para que el paciente no quede atrapado
+        // respondiendo la misma pregunta de signos de alarma.
+        const ruleEngineFollowUps = countRuleEngineFollowUps(messages);
+
         // Emitimos un data-stream compatible con useChat: cuando el objeto
         // completo está disponible, aplicamos el safeguard híbrido, validamos
         // con safeParse y enviamos el JSON final como un único text-delta.
-        const stream = buildStructuredStream(result, modelId);
+        const stream = buildStructuredStream(result, modelId, ruleEngineFollowUps);
 
         return new Response(stream, {
             status: 200,
@@ -156,6 +183,7 @@ export async function POST(req: Request) {
 function buildStructuredStream(
     result: { object: Promise<unknown>; partialObjectStream: AsyncIterable<unknown> },
     modelId: string,
+    ruleEngineFollowUps: number,
 ): ReadableStream<Uint8Array> {
     const encoder = new TextEncoder();
     const textDeltaFrame = (text: string) => `0:${JSON.stringify(text)}\n`;
@@ -189,7 +217,9 @@ function buildStructuredStream(
                 }
 
                 // Safeguard híbrido determinista (helper compartido con DAU).
-                const finalResponse = applyRuleEngineSafeguard(parsed.data);
+                const finalResponse = applyRuleEngineSafeguard(parsed.data, {
+                    ruleEngineFollowUps,
+                });
 
                 controller.enqueue(encoder.encode(textDeltaFrame(JSON.stringify(finalResponse))));
                 controller.enqueue(encoder.encode(finishFrame('stop')));

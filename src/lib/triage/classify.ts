@@ -11,6 +11,12 @@ import {
     dispositionFromEsi,
     suggestedActionForDisposition,
 } from '@/lib/triage/disposition';
+import {
+    buildCriticalScreeningQuestion,
+    enforceSingleQuestion,
+    MAX_RULE_ENGINE_FOLLOW_UPS,
+    RULE_ENGINE_SAFE_EXIT_ESI,
+} from '@/lib/triage/followUp';
 
 /**
  * Helper compartido de clasificación de triage.
@@ -74,14 +80,19 @@ Usa estos datos para tus decisiones clínicas. NO los preguntes de nuevo. NO for
  */
 export function applyRuleEngineSafeguard(
     llmResponse: TriageResponse,
-    options: { retrospective?: boolean } = {},
+    options: { retrospective?: boolean; ruleEngineFollowUps?: number } = {},
 ): TriageResponse {
     const features = (llmResponse.extracted_features ?? {}) as CMDFeatures;
     const evaluation = evaluateRules(features, { retrospective: options.retrospective });
 
-    // Punto de partida: lo que propuso el LLM.
+    // Punto de partida: lo que propuso el LLM. La repregunta se recorta a UNA
+    // sola pregunta: la UI admite una respuesta por turno, y las preguntas
+    // compuestas dejaban partes sin responder que el modelo repetía después.
     const merged: TriageResponse = {
         ...llmResponse,
+        follow_up_question: llmResponse.follow_up_question
+            ? enforceSingleQuestion(llmResponse.follow_up_question)
+            : llmResponse.follow_up_question,
         matched_rule: evaluation.matchedRule,
         rule_rationale: evaluation.rationale,
         decision_source: 'llm',
@@ -106,15 +117,47 @@ export function applyRuleEngineSafeguard(
 
     // Fallo seguro: el motor exige más información para descartar ESI 1/2.
     if (evaluation.needsInfo) {
+        const asked = options.ruleEngineFollowUps ?? 0;
+
+        // Salida segura: agotado el tamizaje, cerramos con una clasificación
+        // conservadora en vez de repreguntar sin fin. Sin este tope, un
+        // paciente cuyo relato nunca menciona los criterios críticos queda
+        // atrapado respondiendo la misma pregunta.
+        if (asked >= MAX_RULE_ENGINE_FOLLOW_UPS) {
+            const llmLevel = merged.esi_level;
+            // Se conserva lo más grave entre la propuesta del modelo y el
+            // nivel de salida (principio del peor caso).
+            const safeLevel =
+                typeof llmLevel === 'number' && llmLevel < RULE_ENGINE_SAFE_EXIT_ESI
+                    ? llmLevel
+                    : RULE_ENGINE_SAFE_EXIT_ESI;
+            return withDisposition({
+                ...merged,
+                status: 'success',
+                esi_level: safeLevel,
+                follow_up_question: null,
+                response_options: [],
+                decision_source: 'rule_engine_safe_exit',
+                reasoning: `${evaluation.rationale} Tras ${asked} intentos de tamizaje no fue posible descartar criterios críticos (${evaluation.missingCritical.join(', ')}); se cierra en ESI ${safeLevel} para atención presencial en vez de prolongar el interrogatorio.`,
+            });
+        }
+
+        // Tamizaje dirigido SOLO a los criterios que siguen faltando, en una
+        // sola pregunta con opciones cerradas para que el paciente pueda
+        // descartarlos todos de una vez.
+        const screening = buildCriticalScreeningQuestion(evaluation.missingCritical);
         return {
             ...merged,
             status: 'needs_info',
+            // Un turno de repregunta no lleva nivel: un ESI preliminar aquí
+            // se filtraba al paciente antes de que la enfermera lo viera.
+            esi_level: null,
             decision_source: 'rule_engine',
-            follow_up_question:
-                merged.follow_up_question ??
-                'Para clasificar con seguridad necesito un poco más de información. ¿Puede describir si tiene dificultad para respirar, alteración de conciencia o algún otro síntoma grave?',
+            follow_up_question: screening.question,
+            response_options: screening.options,
             reason_for_question:
-                merged.reason_for_question ?? `Datos críticos faltantes: ${evaluation.missingCritical.join(', ')}.`,
+                merged.reason_for_question ??
+                `Datos críticos faltantes: ${evaluation.missingCritical.join(', ')}.`,
         };
     }
 

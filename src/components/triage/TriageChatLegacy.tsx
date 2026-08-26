@@ -202,12 +202,33 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
     // mandando { gender: null, ageGroup: null } en todas las
     // requests — por eso el modelo preguntaba el sexo otra vez y
     // hacía preguntas anatómicamente imposibles.
+    /**
+     * Preguntas ya respondidas por el paciente, en orden. Se lleva en un ref
+     * porque se lee dentro de callbacks del SDK que capturarían un valor
+     * obsoleto si viviera en el estado de React.
+     */
+    const answeredQuestionsRef = useRef<Array<{ question: string; answer: string }>>([]);
+
+    const rememberAnswer = useCallback((question: string, answer: string) => {
+        const q = question.trim();
+        const a = answer.trim();
+        if (!q || !a) return;
+        answeredQuestionsRef.current = [
+            ...answeredQuestionsRef.current,
+            { question: q, answer: a },
+        ];
+    }, []);
+
     const buildDemographicsBody = useCallback(
         () => ({
             demographics: {
                 gender: demographicsRef.current.gender,
                 ageGroup: demographicsRef.current.ageGroup,
             },
+            // Pareo pregunta/respuesta de los turnos ya resueltos. Sin esto el
+            // modelo solo ve el texto suelto del botón ("Sangrado moderado")
+            // y no sabe qué pregunta quedó contestada, por lo que la repetía.
+            answered: answeredQuestionsRef.current,
         }),
         [],
     );
@@ -518,9 +539,12 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
         }
     };
 
-    const handleAIQuickReply = (messageId: string, option: string) => {
+    const handleAIQuickReply = (messageId: string, option: string, question: string) => {
         if (isLoading || answeredOptions[messageId]) return;
         setAnsweredOptions((prev) => ({ ...prev, [messageId]: option }));
+        // Se registra ANTES del append para que el pareo viaje en este mismo
+        // turno; el body se construye al momento de enviar.
+        rememberAnswer(question, option);
         append(
             { role: 'user', content: option },
             { options: { body: buildDemographicsBody() } },
@@ -557,6 +581,9 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
         latestAssistantPayload &&
             (latestAssistantPayload.error || latestAssistantPayload.status === 'error'),
     );
+    // Última pregunta abierta del asistente. Es la que responde el texto libre
+    // que el paciente escriba a continuación.
+    const pendingQuestion = (latestAssistantPayload?.follow_up_question ?? '').trim();
     const showErrorBanner =
         !isLoading &&
         (Boolean(error) || latestAssistantHasError || Boolean(streamError));
@@ -717,10 +744,11 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
                                 content={isUser ? m.content : rendered?.content ?? ''}
                                 options={!isUser ? rendered?.options : undefined}
                                 selectedOption={answeredOptions[m.id]}
-                                onOptionClick={(opt) => handleAIQuickReply(m.id, opt)}
+                                onOptionClick={(opt) =>
+                                    handleAIQuickReply(m.id, opt, rendered?.content ?? '')
+                                }
                                 disabled={isLoading}
                                 isLatestWithOptions={isLatest}
-                                esiLevel={rendered?.esiLevel ?? null}
                             />
                         );
                     })}
@@ -816,6 +844,9 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
                         if (inputDisabled) return;
                         if (input.trim().length < MIN_INPUT_LENGTH) return;
                         if (isListening) stopSpeech();
+                        // El texto libre también responde a la última pregunta
+                        // del asistente; se registra para no repreguntarla.
+                        if (pendingQuestion) rememberAnswer(pendingQuestion, input);
                         handleSubmit(e, { options: { body: buildDemographicsBody() } });
                     }}
                     className="flex items-end gap-2 md:gap-3 max-w-4xl mx-auto bg-white rounded-full shadow-xl shadow-emerald-100/50 px-2 md:px-3 py-2 border border-gray-200"
@@ -901,7 +932,6 @@ interface BubbleProps {
     onOptionClick?: (opt: string) => void;
     disabled?: boolean;
     isLatestWithOptions?: boolean;
-    esiLevel?: number | null;
 }
 
 function Bubble({
@@ -912,7 +942,6 @@ function Bubble({
     onOptionClick,
     disabled,
     isLatestWithOptions,
-    esiLevel,
 }: BubbleProps) {
     const isUser = role === 'user';
     const lines = content.split('\n').map((l, idx) => {
@@ -945,17 +974,6 @@ function Bubble({
                     }`}
                 >
                     <div className="text-sm md:text-base leading-relaxed">{lines}</div>
-                    {esiLevel ? (
-                        <div
-                            className={`mt-2 text-[10px] px-2.5 py-0.5 rounded-full inline-block font-black uppercase tracking-wider ${
-                                esiLevel <= 2
-                                    ? 'bg-red-100 text-red-700'
-                                    : 'bg-emerald-100 text-emerald-700'
-                            }`}
-                        >
-                            Criterio IA: ESI {esiLevel}
-                        </div>
-                    ) : null}
                 </div>
 
                 {options && options.length > 0 && !isUser && (

@@ -123,11 +123,16 @@ export function renderAssistantContent(
                   (o) => typeof o === 'string' && o.trim().length > 0,
               )
             : undefined;
+        // Un turno NO terminal no expone nivel ESI. Antes se devolvía el
+        // `esi_level` preliminar y el globo pintaba "Criterio IA: ESI n"
+        // mientras el asistente todavía pedía más información: contradictorio
+        // para el paciente, y le adelantaba una clasificación que ni siquiera
+        // es definitiva ni ha visto la enfermera (evaluación ciega).
         return {
             hideBubble: false,
             content: visibleText || '',
             options,
-            esiLevel: payload.esi_level ?? null,
+            esiLevel: null,
         };
     }
 

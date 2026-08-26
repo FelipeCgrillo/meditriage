@@ -7,8 +7,18 @@ import { CMDSchema } from '@/lib/triage/cmd';
  *  - 'rule_engine'         → el motor determinista asignó el nivel directamente.
  *  - 'rule_engine_override'→ el motor detectó ESI 1/2 y sobre-escribió un nivel
  *                            menos grave propuesto por el LLM (peor caso).
+ *  - 'rule_engine_safe_exit'→ se agotó el tamizaje de criterios críticos sin
+ *                            poder descartarlos; el motor cierra con una
+ *                            clasificación conservadora en vez de repreguntar
+ *                            indefinidamente. Se distingue para poder contar
+ *                            estos casos en el análisis del piloto.
  */
-export const DecisionSourceSchema = z.enum(['llm', 'rule_engine', 'rule_engine_override']);
+export const DecisionSourceSchema = z.enum([
+    'llm',
+    'rule_engine',
+    'rule_engine_override',
+    'rule_engine_safe_exit',
+]);
 export type DecisionSource = z.infer<typeof DecisionSourceSchema>;
 
 /**
