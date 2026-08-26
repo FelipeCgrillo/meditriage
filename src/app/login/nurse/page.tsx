@@ -9,9 +9,28 @@ function NurseLoginForm() {
     const [password, setPassword] = useState('');
     const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
+    // Flujo "olvidé mi contraseña" (PRD mejoras UX RF-13).
+    const [resetMode, setResetMode] = useState(false);
+    const [resetSent, setResetSent] = useState(false);
     const router = useRouter();
     const searchParams = useSearchParams();
     const redirectTo = searchParams.get('redirect') || '/nurse/dashboard';
+
+    async function handleResetRequest(e: React.FormEvent) {
+        e.preventDefault();
+        setError(null);
+        setLoading(true);
+        try {
+            await supabase.auth.resetPasswordForEmail(email, {
+                redirectTo: `${window.location.origin}/auth/callback?next=/account/reset-password`,
+            });
+        } catch (err) {
+            console.error('Reset password error:', err);
+        }
+        // Siempre confirmamos el envío sin revelar si el correo existe.
+        setResetSent(true);
+        setLoading(false);
+    }
 
     async function handleLogin(e: React.FormEvent) {
         e.preventDefault();
@@ -74,6 +93,59 @@ function NurseLoginForm() {
             </div>
 
             <div className="bg-white rounded-2xl shadow-xl p-8 border border-gray-100">
+                {resetMode ? (
+                    resetSent ? (
+                        <div className="text-center space-y-4">
+                            <h2 className="text-lg font-bold text-gray-900">Revisa tu correo</h2>
+                            <p className="text-sm text-gray-600">
+                                Si la dirección está registrada, enviamos un link para
+                                restablecer tu contraseña.
+                            </p>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setResetMode(false);
+                                    setResetSent(false);
+                                }}
+                                className="text-sm font-medium text-emerald-600 hover:text-emerald-700"
+                            >
+                                Volver a iniciar sesión
+                            </button>
+                        </div>
+                    ) : (
+                        <form onSubmit={handleResetRequest} className="space-y-6">
+                            <div>
+                                <label htmlFor="reset-email" className="block text-sm font-medium text-gray-700 mb-2">
+                                    Correo electrónico
+                                </label>
+                                <input
+                                    id="reset-email"
+                                    type="email"
+                                    value={email}
+                                    onChange={(e) => setEmail(e.target.value)}
+                                    required
+                                    autoComplete="username"
+                                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors"
+                                    placeholder="enfermera@hospital.cl"
+                                />
+                            </div>
+                            <button
+                                type="submit"
+                                disabled={loading}
+                                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {loading ? 'Enviando...' : 'Enviar link de recuperación'}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setResetMode(false)}
+                                className="w-full text-sm font-medium text-gray-500 hover:text-gray-700"
+                            >
+                                Volver a iniciar sesión
+                            </button>
+                        </form>
+                    )
+                ) : (
                 <form onSubmit={handleLogin} className="space-y-6">
                     {error && (
                         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
@@ -130,7 +202,19 @@ function NurseLoginForm() {
                             'Ingresar'
                         )}
                     </button>
+
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setError(null);
+                            setResetMode(true);
+                        }}
+                        className="w-full text-sm font-medium text-emerald-600 hover:text-emerald-700"
+                    >
+                        ¿Olvidaste tu contraseña?
+                    </button>
                 </form>
+                )}
             </div>
 
             <p className="text-center text-gray-500 text-sm mt-6">

@@ -39,7 +39,7 @@ export default async function NurseDashboardPage() {
     // Fetch inicial de registros — server-side, sin riesgo de spinner.
     const { data: recordsData, error: recordsError } = await supabase
         .from('clinical_records')
-        .select('id, anonymous_code, esi_level, nurse_override_level, symptoms_text, patient_gender, patient_age_group, consent_eligible, nurse_validated, ai_response, created_at, updated_at')
+        .select('id, anonymous_code, esi_level, nurse_override_level, disposition, symptoms_text, patient_gender, patient_age_group, consent_eligible, nurse_validated, ai_response, created_at, updated_at')
         .order('created_at', { ascending: false })
         .limit(100);
 

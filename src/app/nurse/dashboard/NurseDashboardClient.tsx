@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
+import { dispositionTitle, type Disposition } from '@/lib/triage/disposition';
 
 /**
  * Panel de Enfermería — Evaluación Ciega Independiente
@@ -31,6 +32,7 @@ export interface ClinicalRecord {
     anonymous_code: string | null;
     esi_level: number;
     nurse_override_level: number | null;
+    disposition: Disposition | null;
     symptoms_text: string | null;
     patient_gender: string | null;
     patient_age_group: string | null;
@@ -68,6 +70,24 @@ const AGE_GROUP_LABEL: Record<string, string> = {
     Adult: 'Adulto (18-64)',
     Geriatric: 'Geriátrico (65+)',
 };
+
+// Chip de vía de atención (PRD mejoras UX RF-11; cierra RF-15 del PRD I1).
+// Colores con texto explícito para no depender solo del color (RNF-01).
+const dispositionChipStyles: Record<Disposition, string> = {
+    emergency: 'bg-red-100 text-red-800',
+    same_day_primary_care: 'bg-amber-100 text-amber-800',
+    next_day_primary_care: 'bg-blue-100 text-blue-800',
+};
+
+function DispositionChip({ disposition }: { disposition: Disposition }) {
+    return (
+        <span
+            className={`text-xs px-2 py-0.5 rounded-full font-medium ${dispositionChipStyles[disposition]}`}
+        >
+            {dispositionTitle(disposition)}
+        </span>
+    );
+}
 
 function formatDate(iso: string): string {
     try {
@@ -120,6 +140,10 @@ export default function NurseDashboardClient({
     const [records, setRecords] = useState<ClinicalRecord[]>(initialRecords);
     const [error] = useState<string | null>(initialError);
     const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'classified'>('all');
+    // Errores de guardado de clasificación por registro. Se muestran en la
+    // propia tarjeta con botón de reintento en lugar de un alert() nativo
+    // (PRD mejoras UX RF-12, CA-10).
+    const [classifyErrors, setClassifyErrors] = useState<Record<string, string>>({});
     const [isRefreshing, startTransition] = useTransition();
     const [logoutLoading, setLogoutLoading] = useState(false);
 
@@ -194,6 +218,12 @@ export default function NurseDashboardClient({
     }
 
     async function handleClassify(recordId: string, nurseEsi: number) {
+        setClassifyErrors((prev) => {
+            if (!(recordId in prev)) return prev;
+            const next = { ...prev };
+            delete next[recordId];
+            return next;
+        });
         // Optimistic update — marca el caso como clasificado por enfermería
         // y guarda su nivel ESI INDEPENDIENTE del de la IA.
         setRecords((prev) =>
@@ -234,9 +264,9 @@ export default function NurseDashboardClient({
             );
             const msg = updateError
                 ? `Error al guardar la clasificación: ${updateError.message}`
-                : 'La clasificación no se pudo guardar (0 filas afectadas). Es probable que la sesión haya expirado o no tengas permisos. Cierra sesión y vuelve a entrar.';
+                : 'La clasificación no se pudo guardar. Es probable que la sesión haya expirado o no tengas permisos. Si el reintento falla, cierra sesión y vuelve a entrar.';
             console.error('[handleClassify] Fallo al guardar', { recordId, nurseEsi, error: updateError, data });
-            alert(msg);
+            setClassifyErrors((prev) => ({ ...prev, [recordId]: msg }));
         }
     }
 
@@ -356,7 +386,12 @@ export default function NurseDashboardClient({
                 ) : (
                     <div className="space-y-3">
                         {filtered.map((record) => (
-                            <RecordCard key={record.id} record={record} onClassify={handleClassify} />
+                            <RecordCard
+                                key={record.id}
+                                record={record}
+                                onClassify={handleClassify}
+                                classifyError={classifyErrors[record.id] ?? null}
+                            />
                         ))}
                     </div>
                 )}
@@ -368,9 +403,11 @@ export default function NurseDashboardClient({
 function RecordCard({
     record,
     onClassify,
+    classifyError,
 }: {
     record: ClinicalRecord;
     onClassify: (id: string, esi: number) => void;
+    classifyError: string | null;
 }) {
     const [expanded, setExpanded] = useState(false);
     const [selectedEsi, setSelectedEsi] = useState<number | null>(null);
@@ -432,6 +469,9 @@ function RecordCard({
                                         >
                                             IA: ESI {aiEsi}
                                         </span>
+                                        {record.disposition && (
+                                            <DispositionChip disposition={record.disposition} />
+                                        )}
                                         {concordant ? (
                                             <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium flex items-center gap-1">
                                                 <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
@@ -468,6 +508,28 @@ function RecordCard({
                         {expanded ? 'Ocultar' : classified ? 'Ver detalle' : 'Clasificar'}
                     </button>
                 </div>
+
+                {classifyError && (
+                    <div
+                        role="alert"
+                        className="mt-3 bg-red-50 border border-red-200 text-red-800 rounded-lg px-4 py-3 text-sm flex flex-wrap items-center gap-3"
+                    >
+                        <span className="flex-1 min-w-[200px]">{classifyError}</span>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                if (selectedEsi !== null) {
+                                    onClassify(record.id, selectedEsi);
+                                } else {
+                                    setExpanded(true);
+                                }
+                            }}
+                            className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-md transition-colors"
+                        >
+                            Reintentar
+                        </button>
+                    </div>
+                )}
 
                 {expanded && (
                     <div className="mt-4 pt-4 border-t border-gray-100 space-y-4">

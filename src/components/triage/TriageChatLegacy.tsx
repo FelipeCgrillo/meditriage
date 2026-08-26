@@ -22,7 +22,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useChat } from 'ai/react';
 import {
     Bot,
@@ -32,7 +32,23 @@ import {
     RefreshCw,
     Mic,
     MicOff,
+    Building2,
+    CalendarClock,
+    Stethoscope,
 } from 'lucide-react';
+
+import {
+    dispositionFromEsi,
+    dispositionTitle,
+    suggestedActionForDisposition,
+    type Disposition,
+} from '@/lib/triage/disposition';
+import {
+    AGE_MAP,
+    AGE_OPTIONS,
+    GENDER_MAP,
+    GENDER_OPTIONS,
+} from '@/lib/triage/consentOptions';
 
 import { generateAnonymousCode } from '@/lib/utils/anonymousCode';
 import { extractJSON } from '@/lib/utils/validation';
@@ -73,16 +89,6 @@ interface PreMessage {
 
 const MIN_INPUT_LENGTH = 3;
 
-const GENDER_MAP: Record<string, string> = {
-    Masculino: 'M',
-    Femenino: 'F',
-};
-
-const AGE_MAP: Record<string, string | null> = {
-    '0-17 años': 'Pediatric',
-    '18-64 años': 'Adult',
-    '65+ años': 'Geriatric',
-};
 
 interface TriageChatLegacyProps {
     onFinished?: (anonymousCode: string, demographics: DemographicData) => void;
@@ -91,18 +97,38 @@ interface TriageChatLegacyProps {
 
 export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) {
     // Tenant desde la URL (?org=<slug>). Ver PRD I1 CA-04/CA-05.
+    // Sin slug se muestra un selector de organizaciones activas en vez
+    // del mensaje de enlace no válido (PRD mejoras UX RF-01/RF-02).
+    const router = useRouter();
     const searchParams = useSearchParams();
     const orgSlug = (searchParams?.get('org') ?? '').toLowerCase();
-    const [orgState, setOrgState] = useState<'loading' | 'valid' | 'invalid'>('loading');
+    const [orgState, setOrgState] = useState<'loading' | 'valid' | 'invalid' | 'select'>('loading');
     const [orgName, setOrgName] = useState<string | null>(null);
+    const [orgOptions, setOrgOptions] = useState<
+        Array<{ slug: string; name: string }> | null
+    >(null);
 
     useEffect(() => {
         let cancelled = false;
         async function validateOrg() {
             if (!orgSlug) {
-                if (!cancelled) setOrgState('invalid');
+                setOrgState('select');
+                try {
+                    const res = await fetch('/api/patient/organizations');
+                    const json = await res.json();
+                    if (!cancelled) {
+                        setOrgOptions(
+                            Array.isArray(json?.organizations)
+                                ? json.organizations
+                                : [],
+                        );
+                    }
+                } catch {
+                    if (!cancelled) setOrgOptions([]);
+                }
                 return;
             }
+            setOrgState('loading');
             try {
                 const res = await fetch(`/api/patient/organization?slug=${encodeURIComponent(orgSlug)}`);
                 const json = await res.json();
@@ -140,6 +166,9 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
     const [declined, setDeclined] = useState(false);
     const [isFinished, setIsFinished] = useState(false);
     const [anonymousCode, setAnonymousCode] = useState<string | null>(null);
+    // Vía de atención derivada del ESI final, para la tarjeta de la
+    // pantalla de cierre (PRD mejoras UX RF-06; cierra RF-14 del PRD I1).
+    const [finalDisposition, setFinalDisposition] = useState<Disposition | null>(null);
     const [answeredOptions, setAnsweredOptions] = useState<Record<string, string>>({});
     const [saveError, setSaveError] = useState<string | null>(null);
     const [isSaving, setIsSaving] = useState(false);
@@ -324,6 +353,7 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
                 });
                 pendingPayloadRef.current = payload;
                 setAnonymousCode(code);
+                setFinalDisposition(dispositionFromEsi(esiLevel));
                 setSaveError(null);
                 setIsSaving(true);
                 try {
@@ -456,8 +486,8 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
                 setConsentStep('gender');
                 pushPre({
                     role: 'assistant',
-                    content: 'Para comenzar, indique su género biológico:',
-                    options: ['Masculino', 'Femenino'],
+                    content: 'Para comenzar, indique su sexo:',
+                    options: [...GENDER_OPTIONS],
                 });
             } else {
                 setDeclined(true);
@@ -473,11 +503,7 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
             pushPre({
                 role: 'assistant',
                 content: 'Indique su rango de edad:',
-                options: [
-                    '0-17 años',
-                    '18-64 años',
-                    '65+ años',
-                ],
+                options: [...AGE_OPTIONS],
             });
         } else if (consentStep === 'age') {
             setDemographics((d) => ({ ...d, ageGroup: AGE_MAP[option] ?? null }));
@@ -546,6 +572,60 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
         );
     }
 
+    // Selector previo de organización cuando el link no trae ?org=
+    // (PRD mejoras UX RF-01, CA-01).
+    if (orgState === 'select') {
+        return (
+            <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-b from-indigo-50/80 via-white to-white p-6">
+                <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden border border-gray-100">
+                    <div className="bg-gradient-to-r from-violet-600 to-indigo-600 p-6 text-white text-center">
+                        <Building2 className="w-10 h-10 mx-auto mb-2" aria-hidden="true" />
+                        <h2 className="text-xl font-bold">Seleccione su CESFAM</h2>
+                        <p className="text-sm text-indigo-100 mt-1">
+                            Elija el centro de salud donde se atiende para comenzar.
+                        </p>
+                    </div>
+                    <div className="p-6">
+                        {orgOptions === null ? (
+                            <div className="flex items-center justify-center gap-3 py-6">
+                                <div className="w-5 h-5 rounded-full border-2 border-indigo-600 border-t-transparent animate-spin" />
+                                <p className="text-gray-700 font-medium">Cargando centros...</p>
+                            </div>
+                        ) : orgOptions.length === 0 ? (
+                            <div className="text-gray-700 leading-relaxed">
+                                <p>
+                                    No hay centros disponibles en este momento. Consulte
+                                    directamente en su CESFAM.
+                                </p>
+                                <p className="mt-3 text-sm text-gray-500">
+                                    Si tiene una emergencia, llame al 131.
+                                </p>
+                            </div>
+                        ) : (
+                            <ul className="space-y-2">
+                                {orgOptions.map((org) => (
+                                    <li key={org.slug}>
+                                        <button
+                                            type="button"
+                                            onClick={() =>
+                                                router.replace(
+                                                    `/paciente?org=${encodeURIComponent(org.slug)}`,
+                                                )
+                                            }
+                                            className="w-full text-left px-4 py-3 rounded-xl border border-slate-200 bg-white hover:border-indigo-500 hover:bg-indigo-50 text-slate-800 font-medium transition-colors"
+                                        >
+                                            {org.name}
+                                        </button>
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
     if (orgState === 'invalid') {
         return (
             <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-b from-indigo-50/80 via-white to-white p-6">
@@ -568,6 +648,7 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
         return (
             <FinishedScreen
                 code={anonymousCode}
+                disposition={finalDisposition}
                 onRestart={() => window.location.reload()}
             />
         );
@@ -583,11 +664,15 @@ export default function TriageChatLegacy({ onFinished }: TriageChatLegacyProps) 
                     </div>
                     <div>
                         <h1 className="text-gray-900 font-bold text-base md:text-lg tracking-tight">
-                            Chat de Triage ESI
+                            Orientación de urgencia
                         </h1>
                         <p className="text-gray-500 text-xs md:text-sm font-medium flex items-center gap-1.5">
                             <span className="w-2 h-2 bg-teal-400 rounded-full" />
-                            <span>Asistente médico virtual</span>
+                            <span>
+                                {orgName
+                                    ? `${orgName} · Asistente virtual`
+                                    : 'Asistente virtual'}
+                            </span>
                         </p>
                     </div>
                 </div>
@@ -941,11 +1026,51 @@ function TypingIndicator() {
     );
 }
 
+/**
+ * Tarjeta de vía de atención para el paciente (PRD mejoras UX RF-06/07/08).
+ * Jerarquía visual roja (urgencia), amber (APS hoy) o azul (CESFAM día
+ * siguiente); el nivel se comunica también con texto e ícono, no solo con
+ * color (RNF-01).
+ */
+function DispositionCard({ disposition }: { disposition: Disposition }) {
+    const styles =
+        disposition === 'emergency'
+            ? 'bg-red-50 border-red-300 text-red-900'
+            : disposition === 'same_day_primary_care'
+              ? 'bg-amber-50 border-amber-300 text-amber-900'
+              : 'bg-blue-50 border-blue-300 text-blue-900';
+    const Icon =
+        disposition === 'emergency'
+            ? AlertTriangle
+            : disposition === 'same_day_primary_care'
+              ? Stethoscope
+              : CalendarClock;
+    return (
+        <div
+            role="note"
+            aria-label={`Vía de atención: ${dispositionTitle(disposition)}`}
+            className={`rounded-2xl border-2 p-5 text-left flex gap-3 items-start ${styles}`}
+        >
+            <Icon className="w-6 h-6 shrink-0 mt-0.5" aria-hidden="true" />
+            <div className="flex-1">
+                <p className="text-sm font-black uppercase tracking-wider mb-1">
+                    {dispositionTitle(disposition)}
+                </p>
+                <p className="text-sm leading-relaxed font-medium">
+                    {suggestedActionForDisposition(disposition)}
+                </p>
+            </div>
+        </div>
+    );
+}
+
 function FinishedScreen({
     code,
+    disposition,
     onRestart,
 }: {
     code: string;
+    disposition: Disposition | null;
     onRestart: () => void;
 }) {
     return (
@@ -957,6 +1082,7 @@ function FinishedScreen({
                 <h2 className="text-3xl font-black text-slate-900 leading-tight">
                     Evaluación Finalizada
                 </h2>
+                {disposition && <DispositionCard disposition={disposition} />}
                 <p className="text-slate-500 text-lg">
                     Su información ha sido procesada de forma segura. Por favor,
                     presente el siguiente código al personal de salud:
