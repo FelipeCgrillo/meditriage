@@ -17,8 +17,10 @@ import { describe, it, expect } from 'vitest';
 import {
     buildAnsweredQuestionsMessage,
     buildCriticalScreeningQuestion,
+    countAssistantTurns,
     countRuleEngineFollowUps,
     enforceSingleQuestion,
+    MAX_INTERVIEW_TURNS,
     MAX_RULE_ENGINE_FOLLOW_UPS,
     RULE_ENGINE_SAFE_EXIT_ESI,
 } from '@/lib/triage/followUp';
@@ -151,6 +153,85 @@ describe('countRuleEngineFollowUps — conteo de tamizajes previos', () => {
         expect(countRuleEngineFollowUps([{ role: 'assistant', content: 'texto suelto' }])).toBe(0);
         expect(countRuleEngineFollowUps([])).toBe(0);
         expect(countRuleEngineFollowUps(null)).toBe(0);
+    });
+});
+
+describe('la entrevista clínica es del modelo, no del motor', () => {
+    /** El modelo tiene una pregunta clínica propia y aún faltan críticos. */
+    const conPreguntaClinica = {
+        status: 'needs_info',
+        esi_level: null,
+        follow_up_question: '¿Cuánto tiempo llevas con este dolor?',
+        response_options: ['Menos de 1 hora', '1 a 6 horas', 'Más de 24 horas'],
+        extracted_features: { symptoms_description: 'dolor abdominal' },
+    } as TriageResponse;
+
+    it('el motor NO suplanta la pregunta clínica del modelo por el tamizaje', () => {
+        const out = applyRuleEngineSafeguard(conPreguntaClinica, {
+            ruleEngineFollowUps: 0,
+            assistantTurns: 1,
+        });
+        expect(out.follow_up_question).toBe('¿Cuánto tiempo llevas con este dolor?');
+        expect(out.decision_source).toBe('llm');
+    });
+
+    it('conserva las opciones de la pregunta del modelo', () => {
+        const out = applyRuleEngineSafeguard(conPreguntaClinica, { assistantTurns: 1 });
+        expect(out.response_options).toEqual([
+            'Menos de 1 hora',
+            '1 a 6 horas',
+            'Más de 24 horas',
+        ]);
+    });
+
+    it('una entrevista con preguntas propias no consume el cupo de tamizaje', () => {
+        // Aunque hayan pasado varios turnos, mientras el modelo pregunte lo
+        // suyo el paciente sigue en la entrevista y no se le clasifica de golpe.
+        for (const turno of [1, 2, 3, 4]) {
+            const out = applyRuleEngineSafeguard(conPreguntaClinica, {
+                ruleEngineFollowUps: 0,
+                assistantTurns: turno,
+            });
+            expect(out.status).toBe('needs_info');
+            expect(out.follow_up_question).toBe('¿Cuánto tiempo llevas con este dolor?');
+        }
+    });
+
+    it('el tamizaje solo aparece cuando el modelo ya no tiene qué preguntar', () => {
+        const sinPregunta = {
+            status: 'success',
+            esi_level: 4,
+            reasoning: 'Cuadro leve.',
+            extracted_features: { symptoms_description: 'dolor leve' },
+        } as TriageResponse;
+        const out = applyRuleEngineSafeguard(sinPregunta, {
+            ruleEngineFollowUps: 0,
+            assistantTurns: 3,
+        });
+        expect(out.decision_source).toBe('rule_engine');
+        expect(out.response_options).toContain('Ninguno de estos');
+    });
+
+    it('el tope de entrevista corta un interrogatorio que no converge', () => {
+        const out = applyRuleEngineSafeguard(conPreguntaClinica, {
+            ruleEngineFollowUps: 0,
+            assistantTurns: MAX_INTERVIEW_TURNS,
+        });
+        expect(out.status).toBe('success');
+        expect(out.decision_source).toBe('rule_engine_safe_exit');
+    });
+
+    it('countAssistantTurns cuenta solo los turnos del asistente', () => {
+        expect(
+            countAssistantTurns([
+                { role: 'user', content: 'hola' },
+                { role: 'assistant', content: '{}' },
+                { role: 'user', content: 'sí' },
+                { role: 'assistant', content: '{}' },
+            ]),
+        ).toBe(2);
+        expect(countAssistantTurns([])).toBe(0);
+        expect(countAssistantTurns(null)).toBe(0);
     });
 });
 

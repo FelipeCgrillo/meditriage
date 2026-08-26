@@ -8,6 +8,7 @@ import { TriageResponseSchema } from '@/lib/ai/schemas';
 import { applyRuleEngineSafeguard, buildDemographicsSystemMessage } from '@/lib/triage/classify';
 import {
     buildAnsweredQuestionsMessage,
+    countAssistantTurns,
     countRuleEngineFollowUps,
     type AnsweredQuestion,
 } from '@/lib/triage/followUp';
@@ -138,11 +139,15 @@ export async function POST(req: Request) {
         // conversación. Acota el ciclo para que el paciente no quede atrapado
         // respondiendo la misma pregunta de signos de alarma.
         const ruleEngineFollowUps = countRuleEngineFollowUps(messages);
+        const assistantTurns = countAssistantTurns(messages);
 
         // Emitimos un data-stream compatible con useChat: cuando el objeto
         // completo está disponible, aplicamos el safeguard híbrido, validamos
         // con safeParse y enviamos el JSON final como un único text-delta.
-        const stream = buildStructuredStream(result, modelId, ruleEngineFollowUps);
+        const stream = buildStructuredStream(result, modelId, {
+            ruleEngineFollowUps,
+            assistantTurns,
+        });
 
         return new Response(stream, {
             status: 200,
@@ -183,7 +188,7 @@ export async function POST(req: Request) {
 function buildStructuredStream(
     result: { object: Promise<unknown>; partialObjectStream: AsyncIterable<unknown> },
     modelId: string,
-    ruleEngineFollowUps: number,
+    counters: { ruleEngineFollowUps: number; assistantTurns: number },
 ): ReadableStream<Uint8Array> {
     const encoder = new TextEncoder();
     const textDeltaFrame = (text: string) => `0:${JSON.stringify(text)}\n`;
@@ -217,9 +222,7 @@ function buildStructuredStream(
                 }
 
                 // Safeguard híbrido determinista (helper compartido con DAU).
-                const finalResponse = applyRuleEngineSafeguard(parsed.data, {
-                    ruleEngineFollowUps,
-                });
+                const finalResponse = applyRuleEngineSafeguard(parsed.data, counters);
 
                 controller.enqueue(encoder.encode(textDeltaFrame(JSON.stringify(finalResponse))));
                 controller.enqueue(encoder.encode(finishFrame('stop')));

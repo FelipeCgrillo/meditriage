@@ -14,6 +14,7 @@ import {
 import {
     buildCriticalScreeningQuestion,
     enforceSingleQuestion,
+    MAX_INTERVIEW_TURNS,
     MAX_RULE_ENGINE_FOLLOW_UPS,
     RULE_ENGINE_SAFE_EXIT_ESI,
 } from '@/lib/triage/followUp';
@@ -80,7 +81,11 @@ Usa estos datos para tus decisiones clínicas. NO los preguntes de nuevo. NO for
  */
 export function applyRuleEngineSafeguard(
     llmResponse: TriageResponse,
-    options: { retrospective?: boolean; ruleEngineFollowUps?: number } = {},
+    options: {
+        retrospective?: boolean;
+        ruleEngineFollowUps?: number;
+        assistantTurns?: number;
+    } = {},
 ): TriageResponse {
     const features = (llmResponse.extracted_features ?? {}) as CMDFeatures;
     const evaluation = evaluateRules(features, { retrospective: options.retrospective });
@@ -118,12 +123,36 @@ export function applyRuleEngineSafeguard(
     // Fallo seguro: el motor exige más información para descartar ESI 1/2.
     if (evaluation.needsInfo) {
         const asked = options.ruleEngineFollowUps ?? 0;
+        const turns = options.assistantTurns ?? 0;
+        const modelQuestion = (merged.follow_up_question ?? '').trim();
 
-        // Salida segura: agotado el tamizaje, cerramos con una clasificación
-        // conservadora en vez de repreguntar sin fin. Sin este tope, un
-        // paciente cuyo relato nunca menciona los criterios críticos queda
-        // atrapado respondiendo la misma pregunta.
-        if (asked >= MAX_RULE_ENGINE_FOLLOW_UPS) {
+        // La entrevista clínica es del MODELO. Mientras tenga preguntas
+        // propias que hacer, el motor no lo interrumpe: solo anota que
+        // todavía no puede descartar criterios críticos.
+        //
+        // Suplantar aquí la pregunta del modelo por el tamizaje —como se hacía
+        // antes— dejaba al paciente respondiendo dos veces la misma pregunta de
+        // signos de alarma y clasificado de inmediato, sin que nadie llegara a
+        // preguntarle por sus síntomas.
+        if (modelQuestion && turns < MAX_INTERVIEW_TURNS) {
+            return {
+                ...merged,
+                status: 'needs_info',
+                // Un turno de repregunta no lleva nivel: un ESI preliminar
+                // aquí se filtraba al paciente antes de que la enfermera lo
+                // viera.
+                esi_level: null,
+                decision_source: 'llm',
+                follow_up_question: modelQuestion,
+            };
+        }
+
+        // Salida segura: agotado el tamizaje, o la entrevista se extendió más
+        // allá de lo razonable, cerramos con una clasificación conservadora en
+        // vez de repreguntar sin fin. Sin este tope, un paciente cuyo relato
+        // nunca menciona los criterios críticos queda atrapado respondiendo la
+        // misma pregunta.
+        if (asked >= MAX_RULE_ENGINE_FOLLOW_UPS || turns >= MAX_INTERVIEW_TURNS) {
             const llmLevel = merged.esi_level;
             // Se conserva lo más grave entre la propuesta del modelo y el
             // nivel de salida (principio del peor caso).
@@ -138,7 +167,7 @@ export function applyRuleEngineSafeguard(
                 follow_up_question: null,
                 response_options: [],
                 decision_source: 'rule_engine_safe_exit',
-                reasoning: `${evaluation.rationale} Tras ${asked} intentos de tamizaje no fue posible descartar criterios críticos (${evaluation.missingCritical.join(', ')}); se cierra en ESI ${safeLevel} para atención presencial en vez de prolongar el interrogatorio.`,
+                reasoning: `${evaluation.rationale} Tras ${asked} intentos de tamizaje y ${turns} turnos no fue posible descartar criterios críticos (${evaluation.missingCritical.join(', ')}); se cierra en ESI ${safeLevel} para atención presencial en vez de prolongar el interrogatorio.`,
             });
         }
 

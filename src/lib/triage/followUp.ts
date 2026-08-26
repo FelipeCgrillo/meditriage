@@ -154,8 +154,30 @@ export function countRuleEngineFollowUps(
  * Máximo de repreguntas de tamizaje que el motor puede forzar antes de salir
  * con una clasificación segura. Dos intentos bastan para que un paciente que
  * va a responder responda; más allá de eso el ciclo solo agrega fricción.
+ *
+ * Cuenta SOLO los turnos que el motor suplantó con su pregunta de tamizaje.
+ * Las preguntas clínicas del propio modelo no consumen este cupo: son la
+ * entrevista, no un fallo del tamizaje.
  */
 export const MAX_RULE_ENGINE_FOLLOW_UPS = 2;
+
+/**
+ * Tope de turnos de la entrevista completa. Actúa de red: si el modelo se
+ * queda preguntando sin converger, el paciente igual llega a una clasificación
+ * en vez de quedar en un interrogatorio sin fin.
+ *
+ * Holgado a propósito: una entrevista de triage legítima ronda los tres o
+ * cuatro turnos, así que este tope no debería alcanzarse casi nunca.
+ */
+export const MAX_INTERVIEW_TURNS = 8;
+
+/** Cuenta los turnos de respuesta del asistente en la conversación. */
+export function countAssistantTurns(
+    messages: Array<{ role: string; content: string }> | null | undefined,
+): number {
+    if (!messages) return 0;
+    return messages.filter((m) => m?.role === 'assistant').length;
+}
 
 /**
  * Nivel ESI de salida cuando se agota el tamizaje sin poder descartar ESI 1/2.
