@@ -27,6 +27,7 @@ export default defineConfig({
             '__tests__/safety/multitenancy.test.ts',
             '__tests__/safety/ux-increment.test.ts',
             '__tests__/safety/follow-up-loop.test.ts',
+            '__tests__/safety/referral.test.ts',
             '__tests__/dau/dau-parser.test.ts',
             '__tests__/dau/dau-mapping.test.ts',
             '__tests__/dau/dau-summary.test.ts',

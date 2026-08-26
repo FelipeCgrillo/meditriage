@@ -63,6 +63,7 @@ import {
     type ClinicalRecordPayload,
 } from '@/lib/utils/clinicalRecord';
 import { useSpeechRecognition } from '@/lib/hooks/useSpeechRecognition';
+import ReferralPanel from '@/components/triage/ReferralPanel';
 
 interface TriageResponse {
     status?: 'success' | 'needs_info' | 'error' | string;
@@ -1090,7 +1091,7 @@ function FinishedScreen({
 }) {
     return (
         <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-teal-50 flex items-center justify-center p-4">
-            <div className="max-w-xl w-full bg-white rounded-[32px] shadow-2xl border border-slate-100 p-8 text-center space-y-6">
+            <div className="max-w-xl w-full bg-white rounded-[32px] shadow-2xl border border-slate-100 p-8 text-center space-y-6 my-8">
                 <div className="w-20 h-20 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto">
                     <Bot className="w-10 h-10" />
                 </div>
@@ -1098,6 +1099,11 @@ function FinishedScreen({
                     Evaluación Finalizada
                 </h2>
                 {disposition && <DispositionCard disposition={disposition} />}
+                {/* Derivación concreta: centro cercano o reserva de hora
+                    (PRD-derivacion-agendamiento.md, incremento D1). */}
+                {disposition && (
+                    <ReferralPanel disposition={disposition} anonymousCode={code} />
+                )}
                 <p className="text-slate-500 text-lg">
                     Su información ha sido procesada de forma segura. Por favor,
                     presente el siguiente código al personal de salud:

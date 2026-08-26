@@ -41,6 +41,12 @@ export interface ClinicalRecord {
     ai_response: unknown;
     created_at: string;
     updated_at: string;
+    // Derivación (PRD-derivacion-agendamiento.md, RF-35/RF-36). Ninguno de
+    // estos campos es identificable: los datos de contacto de la reserva
+    // viven en `appointment_bookings`, que este panel jamás consulta.
+    referral_booked?: boolean | null;
+    referral_no_offer_reason?: 'urgency_level' | 'no_location' | 'no_slots' | null;
+    referral_center?: { name: string } | Array<{ name: string }> | null;
 }
 
 interface Props {
@@ -78,6 +84,42 @@ const dispositionChipStyles: Record<Disposition, string> = {
     same_day_primary_care: 'bg-amber-100 text-amber-800',
     next_day_primary_care: 'bg-blue-100 text-blue-800',
 };
+
+/**
+ * Estado de la derivación, para que la enfermera sepa si el paciente quedó
+ * con hora o no y por qué (RF-35/RF-36). Texto explícito, no solo color.
+ */
+const NO_OFFER_LABEL: Record<string, string> = {
+    urgency_level: 'Sin agenda: por nivel de urgencia',
+    no_location: 'Sin agenda: sin ubicación',
+    no_slots: 'Sin agenda: sin cupos',
+};
+
+function centerName(
+    center: { name: string } | Array<{ name: string }> | null | undefined,
+): string | null {
+    if (!center) return null;
+    if (Array.isArray(center)) return center[0]?.name ?? null;
+    return center.name;
+}
+
+function ReferralChip({ record }: { record: ClinicalRecord }) {
+    if (record.referral_booked) {
+        const name = centerName(record.referral_center);
+        return (
+            <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-emerald-100 text-emerald-800">
+                {name ? `Hora reservada · ${name}` : 'Hora reservada'}
+            </span>
+        );
+    }
+    const reason = record.referral_no_offer_reason;
+    if (!reason) return null;
+    return (
+        <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-gray-100 text-gray-600">
+            {NO_OFFER_LABEL[reason] ?? 'Sin agenda'}
+        </span>
+    );
+}
 
 function DispositionChip({ disposition }: { disposition: Disposition }) {
     return (
@@ -458,6 +500,7 @@ function RecordCard({
                                         Por clasificar
                                     </span>
                                 )}
+                                <ReferralChip record={record} />
                                 {classified && (
                                     <>
                                         <span
