@@ -59,23 +59,26 @@ ON CONFLICT DO NOTHING;
 -- Genera cupos de 20 minutos entre las 09:00 y las 17:00 para los próximos 7
 -- días, solo en días hábiles. Se omiten los cupos ya pasados.
 
+-- La franja horaria se interpreta en America/Santiago, NO en la zona de la
+-- base (UTC). Generarla con `NOW()` a secas produce cupos a las 05:00 hora
+-- local, en que ningun centro atiende.
 INSERT INTO public.care_center_slots (care_center_id, slot_start, slot_end)
 SELECT
     c.id,
-    slot_time,
-    slot_time + INTERVAL '20 minutes'
+    s.local_time AT TIME ZONE 'America/Santiago',
+    (s.local_time + INTERVAL '20 minutes') AT TIME ZONE 'America/Santiago'
 FROM public.care_centers c
 CROSS JOIN LATERAL (
     SELECT generate_series(
-        date_trunc('day', NOW()) + INTERVAL '9 hours',
-        date_trunc('day', NOW()) + INTERVAL '7 days' + INTERVAL '17 hours',
+        date_trunc('day', NOW() AT TIME ZONE 'America/Santiago') + INTERVAL '9 hours',
+        date_trunc('day', NOW() AT TIME ZONE 'America/Santiago') + INTERVAL '7 days' + INTERVAL '17 hours',
         INTERVAL '20 minutes'
-    ) AS slot_time
+    ) AS local_time
 ) s
 WHERE c.fhir_endpoint_id IS NOT NULL
-  AND EXTRACT(ISODOW FROM s.slot_time) <= 5          -- lunes a viernes
-  AND EXTRACT(HOUR FROM s.slot_time) BETWEEN 9 AND 16
-  AND s.slot_time > NOW()
+  AND EXTRACT(ISODOW FROM s.local_time) <= 5          -- lunes a viernes
+  AND EXTRACT(HOUR FROM s.local_time) BETWEEN 9 AND 16
+  AND (s.local_time AT TIME ZONE 'America/Santiago') > NOW()
 ON CONFLICT (care_center_id, slot_start) DO NOTHING;
 
 COMMIT;
