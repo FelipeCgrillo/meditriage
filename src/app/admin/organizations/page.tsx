@@ -71,17 +71,13 @@ export default function OrganizationsAdminPage() {
     }
 
     return (
-        <main className="min-h-screen bg-slate-50 p-8">
-            <div className="max-w-3xl mx-auto space-y-8">
-                <header>
-                    <a href="/admin" className="text-sm text-indigo-600 hover:underline">← Volver al panel de administración</a>
-                    <h1 className="text-2xl font-bold text-gray-900 mt-2">Organizaciones</h1>
-                    <p className="text-sm text-gray-600 mt-1">
-                        Solo el administrador de plataforma puede crear organizaciones nuevas.
-                    </p>
-                </header>
+        <main>
+            <div className="max-w-3xl mx-auto space-y-6">
+                <p className="text-sm text-slate-500">
+                    Solo el administrador de plataforma puede crear organizaciones nuevas.
+                </p>
 
-                <section className="bg-white rounded-2xl shadow p-6">
+                <section className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
                     <h2 className="font-semibold text-gray-900 mb-4">Crear organización</h2>
                     <form onSubmit={onCreate} className="grid grid-cols-1 md:grid-cols-3 gap-3">
                         <div className="md:col-span-1">
@@ -123,7 +119,7 @@ export default function OrganizationsAdminPage() {
                     {ok ? <p className="text-sm text-green-600 mt-3">{ok}</p> : null}
                 </section>
 
-                <section className="bg-white rounded-2xl shadow p-6">
+                <section className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
                     <h2 className="font-semibold text-gray-900 mb-4">Organizaciones existentes</h2>
                     {loading ? (
                         <p className="text-sm text-gray-500">Cargando...</p>
