@@ -10,7 +10,7 @@ function cls(partial: Partial<DAUClassification>): DAUClassification {
         decision_source: partial.decision_source ?? 'llm',
         matched_rule: partial.matched_rule ?? null,
         extracted_features: partial.extracted_features ?? {},
-        nurse_esi: partial.nurse_esi ?? null,
+        tens_esi: partial.tens_esi ?? null,
         agreement: partial.agreement ?? null,
     };
 }
@@ -18,9 +18,9 @@ function cls(partial: Partial<DAUClassification>): DAUClassification {
 describe('summarizeDAU', () => {
     it('cuenta totales, classified y needs_info', () => {
         const s = summarizeDAU([
-            cls({ status: 'success', predicted_esi: 3, nurse_esi: 3 }),
-            cls({ status: 'needs_info', predicted_esi: null, nurse_esi: 2 }),
-            cls({ status: 'success', predicted_esi: 4, nurse_esi: null }),
+            cls({ status: 'success', predicted_esi: 3, tens_esi: 3 }),
+            cls({ status: 'needs_info', predicted_esi: null, tens_esi: 2 }),
+            cls({ status: 'success', predicted_esi: 4, tens_esi: null }),
         ]);
         expect(s.total).toBe(3);
         expect(s.classified).toBe(2);
@@ -30,10 +30,10 @@ describe('summarizeDAU', () => {
 
     it('calcula concordancia simple solo sobre pares comparables', () => {
         const s = summarizeDAU([
-            cls({ predicted_esi: 2, nurse_esi: 2 }), // agree
-            cls({ predicted_esi: 3, nurse_esi: 4 }), // disagree
-            cls({ predicted_esi: 5, nurse_esi: 5 }), // agree
-            cls({ status: 'needs_info', predicted_esi: null, nurse_esi: 1 }), // no comparable
+            cls({ predicted_esi: 2, tens_esi: 2 }), // agree
+            cls({ predicted_esi: 3, tens_esi: 4 }), // disagree
+            cls({ predicted_esi: 5, tens_esi: 5 }), // agree
+            cls({ status: 'needs_info', predicted_esi: null, tens_esi: 1 }), // no comparable
         ]);
         expect(s.comparable).toBe(3);
         expect(s.agreements).toBe(2);
@@ -42,8 +42,8 @@ describe('summarizeDAU', () => {
 
     it('simple_agreement es null cuando no hay pares comparables', () => {
         const s = summarizeDAU([
-            cls({ status: 'needs_info', predicted_esi: null, nurse_esi: 2 }),
-            cls({ predicted_esi: 3, nurse_esi: null }),
+            cls({ status: 'needs_info', predicted_esi: null, tens_esi: 2 }),
+            cls({ predicted_esi: 3, tens_esi: null }),
         ]);
         expect(s.comparable).toBe(0);
         expect(s.simple_agreement).toBeNull();
@@ -51,10 +51,10 @@ describe('summarizeDAU', () => {
 
     it('construye una matriz 5x5 con la orientación predicho×enfermera', () => {
         const s = summarizeDAU([
-            cls({ predicted_esi: 1, nurse_esi: 1 }),
-            cls({ predicted_esi: 2, nurse_esi: 3 }),
-            cls({ predicted_esi: 2, nurse_esi: 3 }),
-            cls({ predicted_esi: 5, nurse_esi: 4 }),
+            cls({ predicted_esi: 1, tens_esi: 1 }),
+            cls({ predicted_esi: 2, tens_esi: 3 }),
+            cls({ predicted_esi: 2, tens_esi: 3 }),
+            cls({ predicted_esi: 5, tens_esi: 4 }),
         ]);
         expect(s.confusion_matrix).toHaveLength(5);
         expect(s.confusion_matrix.every((row) => row.length === 5)).toBe(true);
@@ -69,8 +69,8 @@ describe('summarizeDAU', () => {
 
     it('ignora ESI inválidos (fuera de 1..5) en la matriz', () => {
         const s = summarizeDAU([
-            cls({ predicted_esi: 0 as unknown as number, nurse_esi: 3 }),
-            cls({ predicted_esi: 3, nurse_esi: 6 as unknown as number }),
+            cls({ predicted_esi: 0 as unknown as number, tens_esi: 3 }),
+            cls({ predicted_esi: 3, tens_esi: 6 as unknown as number }),
         ]);
         expect(s.comparable).toBe(0);
         expect(s.confusion_matrix.flat().reduce((a, b) => a + b, 0)).toBe(0);
@@ -78,8 +78,8 @@ describe('summarizeDAU', () => {
 
     it('es determinista', () => {
         const data = [
-            cls({ predicted_esi: 2, nurse_esi: 2 }),
-            cls({ predicted_esi: 3, nurse_esi: 4 }),
+            cls({ predicted_esi: 2, tens_esi: 2 }),
+            cls({ predicted_esi: 3, tens_esi: 4 }),
         ];
         const first = JSON.stringify(summarizeDAU(data));
         for (let i = 0; i < 20; i++) {

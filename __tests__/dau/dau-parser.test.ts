@@ -15,7 +15,7 @@ describe('parseDAUJson', () => {
                 reported_symptoms: 'desde hace 2 horas',
                 sex: 'M',
                 age_years: 60,
-                nurse_esi: 2,
+                tens_esi: 2,
             },
         ]);
         expect(errors).toHaveLength(0);
@@ -25,7 +25,7 @@ describe('parseDAUJson', () => {
             chief_complaint: 'dolor de pecho',
             sex: 'M',
             age_years: 60,
-            nurse_esi: 2,
+            tens_esi: 2,
         });
     });
 
@@ -54,7 +54,7 @@ describe('parseDAUJson', () => {
             reported_symptoms: 'tos seca',
             sex: 'F',
             age_years: 30,
-            nurse_esi: 3,
+            tens_esi: 3,
         });
     });
 
@@ -99,7 +99,12 @@ describe('parseDAUJson', () => {
                 'admission_datetime',
                 'chief_complaint',
                 'reported_symptoms',
-                'nurse_esi',
+                'tens_esi',
+                'outcome',
+                'outcome_raw',
+                'age_band',
+                'period',
+                'time_band',
             ].sort(),
         );
         // Cualquier serialización del record no contiene los valores instrumentados.
@@ -110,13 +115,13 @@ describe('parseDAUJson', () => {
         expect(serialized).not.toContain('39.5');
     });
 
-    it('rechaza nurse_esi fuera de rango 1..5', () => {
+    it('rechaza tens_esi fuera de rango 1..5', () => {
         const { records } = parseDAUJson([
             { chief_complaint: 'a', esi_enfermera: 0 },
             { chief_complaint: 'b', esi_enfermera: 6 },
             { chief_complaint: 'c', esi_enfermera: 'foo' },
         ]);
-        expect(records.every((r) => r.nurse_esi === null)).toBe(true);
+        expect(records.every((r) => r.tens_esi === null)).toBe(true);
     });
 });
 
@@ -130,8 +135,8 @@ describe('parseDAUCsv', () => {
         const { records, errors } = parseDAUCsv(csv);
         expect(errors).toHaveLength(0);
         expect(records).toHaveLength(2);
-        expect(records[0]).toMatchObject({ chief_complaint: 'dolor toracico', nurse_esi: 2, sex: 'M' });
-        expect(records[1]).toMatchObject({ chief_complaint: 'cefalea', nurse_esi: 4, sex: 'F' });
+        expect(records[0]).toMatchObject({ chief_complaint: 'dolor toracico', tens_esi: 2, sex: 'M' });
+        expect(records[1]).toMatchObject({ chief_complaint: 'cefalea', tens_esi: 4, sex: 'F' });
     });
 
     it('soporta delimitador punto y coma y comillas con comas internas', () => {

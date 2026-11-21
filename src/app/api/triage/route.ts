@@ -1,13 +1,15 @@
-import { streamObject } from 'ai';
-import { createAnthropic } from '@ai-sdk/anthropic';
 import { TRIAGE_SYSTEM_PROMPT } from '@/lib/ai/prompts';
 import { sanitizeForAI } from '@/lib/utils/pii-filter';
 import { DEFAULT_ANTHROPIC_MODEL, getAnthropicModelId } from '@/lib/ai/config';
-import { FALLBACK_PAYLOAD, buildFallbackStreamResponse } from '@/lib/ai/safe-stream';
-import { TriageResponseSchema } from '@/lib/ai/schemas';
+import { FALLBACK_PAYLOAD, buildFallbackStreamResponse, finishFrame, textDeltaFrame } from '@/lib/ai/safe-stream';
+import { callTriageModel } from '@/lib/ai/triageModel';
 import { applyRuleEngineSafeguard, buildDemographicsSystemMessage } from '@/lib/triage/classify';
 
-export const runtime = 'edge';
+export const runtime = 'nodejs';
+
+/** Límites de la conversación aceptada desde el cliente (abuso y costo). */
+const MAX_MESSAGES = 30;
+const MAX_MESSAGE_CHARS = 4000;
 
 /**
  * POST /api/triage
@@ -16,8 +18,8 @@ export const runtime = 'edge';
  *
  * ───────────────────────────────────────────────────────────────────────────
  * Salida estructurada REAL (Brecha 2):
- *   - Usa `streamObject` del Vercel AI SDK con `schema: TriageResponseSchema`,
- *     restringiendo el espacio de salida del modelo a la forma del schema.
+ *   - Usa el SDK oficial de Anthropic con salida estructurada derivada de
+ *     `TriageModelOutputSchema`, restringiendo la forma de la respuesta.
  *   - El objeto final se valida SIEMPRE con `safeParse` antes de emitirse.
  *     Si la validación falla → fallback seguro. Esto NO garantiza ausencia de
  *     alucinaciones de contenido; ELIMINA respuestas malformadas y restringe
@@ -50,17 +52,34 @@ export async function POST(req: Request) {
             });
         }
 
-        type ChatMessage = { role: 'user' | 'assistant' | 'system'; content: string };
+        type ChatMessage = { role: 'user' | 'assistant'; content: string };
         type Demographics = {
             gender?: string | null;
             ageGroup?: string | null;
         };
-        const { messages, demographics } = body as {
-            messages?: ChatMessage[];
+        const { messages: rawMessages, demographics } = body as {
+            messages?: unknown;
             demographics?: Demographics;
         };
 
-        if (!messages || messages.length === 0) {
+        // Solo se aceptan turnos user/assistant con texto acotado. Un rol
+        // `system` enviado por el cliente se descarta (inyección de prompt).
+        const messages: ChatMessage[] = Array.isArray(rawMessages)
+            ? rawMessages
+                  .filter(
+                      (m): m is ChatMessage =>
+                          !!m &&
+                          typeof m === 'object' &&
+                          ((m as ChatMessage).role === 'user' || (m as ChatMessage).role === 'assistant') &&
+                          typeof (m as ChatMessage).content === 'string',
+                  )
+                  .slice(-MAX_MESSAGES)
+                  .map((m) => ({ role: m.role, content: m.content.slice(0, MAX_MESSAGE_CHARS) }))
+            : [];
+        // La API exige que la conversación comience con un turno del usuario.
+        while (messages.length > 0 && messages[0].role !== 'user') messages.shift();
+
+        if (messages.length === 0) {
             return new Response(JSON.stringify({ error: 'Messages are required' }), {
                 status: 400,
                 headers: { 'Content-Type': 'application/json' },
@@ -100,22 +119,25 @@ export async function POST(req: Request) {
             m.role === 'user' ? { ...m, content: sanitizeForAI(m.content) } : m,
         );
 
-        const anthropic = createAnthropic({ apiKey });
-        const modelId = getAnthropicModelId();
-
-        // ── Salida estructurada con Zod (streamObject) ──────────────────
-        const result = await streamObject({
-            model: anthropic(modelId),
-            schema: TriageResponseSchema,
+        const result = await callTriageModel({
             system: `${TRIAGE_SYSTEM_PROMPT}\n\n${demographicsSystemMessage}`,
             messages: sanitizedMessages,
-            temperature: 0.1,
         });
+        if (!result.ok) {
+            return buildFallbackStreamResponse(FALLBACK_PAYLOAD);
+        }
 
-        // Emitimos un data-stream compatible con useChat: cuando el objeto
-        // completo está disponible, aplicamos el safeguard híbrido, validamos
-        // con safeParse y enviamos el JSON final como un único text-delta.
-        const stream = buildStructuredStream(result, modelId);
+        // Safeguard híbrido determinista (helper compartido con DAU). Se
+        // emite como un único text-delta compatible con useChat.
+        const finalResponse = applyRuleEngineSafeguard(result.data);
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+                controller.enqueue(encoder.encode(textDeltaFrame(JSON.stringify(finalResponse))));
+                controller.enqueue(encoder.encode(finishFrame('stop')));
+                controller.close();
+            },
+        });
 
         return new Response(stream, {
             status: 200,
@@ -134,80 +156,6 @@ export async function POST(req: Request) {
         });
         return buildFallbackStreamResponse(FALLBACK_PAYLOAD);
     }
-}
-
-/**
- * Construye el ReadableStream final. Espera el objeto completo del modelo,
- * aplica el safeguard, valida con safeParse y emite un text-delta del AI SDK
- * (`0:"..."`) seguido de un finish frame, de modo que useChat/extractJSON lo
- * consuman sin cambios mayores en el cliente.
- *
- * ───────────────────────────────────────────────────────────────────────────
- * FIX DE REGRESIÓN (chat colgado en "Analizando síntomas…"):
- *   `streamObject(...).object` SOLO resuelve cuando se consume el stream del
- *   resultado: la resolución de la promesa ocurre dentro del `transform`/
- *   `flush` de `originalStream` (ver node_modules/ai/dist/index.mjs). El código
- *   anterior hacía `await result.object` SIN consumir ningún stream, por lo que
- *   la promesa nunca resolvía, el endpoint quedaba colgado y el cliente nunca
- *   recibía frames (se quedaba en "Analizando síntomas…"). Aquí drenamos
- *   `partialObjectStream` para empujar la generación antes de leer `.object`.
- * ───────────────────────────────────────────────────────────────────────────
- */
-function buildStructuredStream(
-    result: { object: Promise<unknown>; partialObjectStream: AsyncIterable<unknown> },
-    modelId: string,
-): ReadableStream<Uint8Array> {
-    const encoder = new TextEncoder();
-    const textDeltaFrame = (text: string) => `0:${JSON.stringify(text)}\n`;
-    const finishFrame = (reason: string) =>
-        `d:${JSON.stringify({ finishReason: reason, usage: { promptTokens: 0, completionTokens: 0 } })}\n`;
-
-    return new ReadableStream<Uint8Array>({
-        async start(controller) {
-            try {
-                // Drenar el stream para DRIVE la generación: sin esto,
-                // `result.object` nunca resuelve (ver nota de regresión arriba).
-                for await (const _partial of result.partialObjectStream) {
-                    void _partial;
-                }
-
-                // `result.object` resuelve con el objeto completo o rechaza si
-                // la generación no produjo un objeto conforme al schema.
-                const raw = await result.object;
-
-                // Validación REAL con Zod antes de cualquier persistencia/uso.
-                const parsed = TriageResponseSchema.safeParse(raw);
-                if (!parsed.success) {
-                    console.error('[triage] safeParse falló sobre la salida del modelo', {
-                        model: modelId,
-                        issues: parsed.error.issues.slice(0, 5),
-                    });
-                    controller.enqueue(encoder.encode(textDeltaFrame(JSON.stringify(FALLBACK_PAYLOAD))));
-                    controller.enqueue(encoder.encode(finishFrame('error')));
-                    controller.close();
-                    return;
-                }
-
-                // Safeguard híbrido determinista (helper compartido con DAU).
-                const finalResponse = applyRuleEngineSafeguard(parsed.data);
-
-                controller.enqueue(encoder.encode(textDeltaFrame(JSON.stringify(finalResponse))));
-                controller.enqueue(encoder.encode(finishFrame('stop')));
-                controller.close();
-            } catch (err) {
-                const e = err as { name?: string; message?: string; statusCode?: number } | null;
-                console.error('[triage] provider/stream error', {
-                    model: modelId,
-                    name: e?.name,
-                    status: e?.statusCode,
-                    message: e?.message,
-                });
-                controller.enqueue(encoder.encode(textDeltaFrame(JSON.stringify(FALLBACK_PAYLOAD))));
-                controller.enqueue(encoder.encode(finishFrame('error')));
-                controller.close();
-            }
-        },
-    });
 }
 
 /**

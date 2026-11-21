@@ -1,4 +1,5 @@
 import { classifyFromText } from '@/lib/triage/classify';
+import { complaintKey, deidentifyText } from '@/lib/dau/deidentify';
 import type { DAURecord, DAUClassification } from '@/lib/dau/types';
 import type { TriageResponse } from '@/lib/ai/schemas';
 
@@ -10,8 +11,8 @@ import type { TriageResponse } from '@/lib/ai/schemas';
  * RESTRICCIÓN METODOLÓGICA (no negociable):
  *   A `classifyFromText` SOLO se le pasan los campos que el paciente habría
  *   escrito en el chat: chief_complaint + reported_symptoms (texto libre) y
- *   sex/age_group (contexto demográfico). El gold standard `nurse_esi` jamás
- *   se pasa al clasificador: se conserva aparte y solo se copia al resultado
+ *   sex/age_group (contexto demográfico). El comparador `tens_esi` y el desenlace `outcome`
+ *   jamás se pasan al clasificador: se conserva aparte y solo se copia al resultado
  *   para la comparación posterior. Los signos vitales instrumentados del DAU
  *   ni siquiera existen en `DAURecord`, así que es imposible inyectarlos.
  * ───────────────────────────────────────────────────────────────────────────
@@ -31,20 +32,47 @@ function sexToGender(sex: DAURecord['sex']): string | null {
  */
 export function toClassification(record: DAURecord, response: TriageResponse): DAUClassification {
     const predicted = response.status === 'success' ? (response.esi_level ?? null) : null;
-    const nurse = record.nurse_esi ?? null;
-    const agreement =
-        predicted != null && nurse != null ? predicted === nurse : null;
+    const tens = record.tens_esi ?? null;
+    const agreement = predicted != null && tens != null ? predicted === tens : null;
+    const modelError = (response as { error?: boolean }).error === true;
 
     return {
         record_id: record.record_id,
         predicted_esi: predicted,
+        llm_esi: response.llm_status === 'success' ? (response.llm_esi_level ?? null) : null,
         status: response.status === 'success' ? 'success' : 'needs_info',
+        model_error: modelError,
         decision_source: response.decision_source ?? 'llm',
         matched_rule: response.matched_rule ?? null,
         rule_rationale: response.rule_rationale,
         extracted_features: response.extracted_features ?? {},
-        nurse_esi: nurse,
+        tens_esi: tens,
         agreement,
+        outcome: record.outcome ?? null,
+        sex: record.sex ?? null,
+        age_group: record.age_group ?? null,
+    };
+}
+
+/**
+ * Prepara el relato que puede salir hacia el proveedor del modelo: aplica el
+ * detector de desidentificación sobre motivo y síntomas por separado.
+ * Devuelve también los metadatos de auditoría para la bitácora.
+ */
+export function prepareRecordText(record: DAURecord): {
+    chiefComplaint: string;
+    reportedSymptoms: string | null;
+    vitalsRemoved: boolean;
+    categories: string[];
+} {
+    const cc = deidentifyText(record.chief_complaint);
+    const rs = record.reported_symptoms ? deidentifyText(record.reported_symptoms) : null;
+    const categories = new Set<string>([...Object.keys(cc.hits), ...Object.keys(rs?.hits ?? {})]);
+    return {
+        chiefComplaint: cc.text,
+        reportedSymptoms: rs?.text || null,
+        vitalsRemoved: cc.vitals_removed || cc.observations_removed || !!rs?.vitals_removed || !!rs?.observations_removed,
+        categories: Array.from(categories).sort(),
     };
 }
 
@@ -58,14 +86,21 @@ export function toClassification(record: DAURecord, response: TriageResponse): D
  * que clasifica con `retrospective` en su default `false`.
  */
 export async function classifyRecord(record: DAURecord): Promise<DAUClassification> {
+    const prepared = prepareRecordText(record);
     const response = await classifyFromText({
-        chiefComplaint: record.chief_complaint,
-        reportedSymptoms: record.reported_symptoms,
+        chiefComplaint: prepared.chiefComplaint || '[sin relato]',
+        reportedSymptoms: prepared.reportedSymptoms,
         gender: sexToGender(record.sex),
         ageGroup: record.age_group,
         retrospective: true,
     });
-    return toClassification(record, response);
+    return {
+        ...toClassification(record, response),
+        sent_text: [prepared.chiefComplaint, prepared.reportedSymptoms].filter(Boolean).join('. '),
+        vitals_removed: prepared.vitalsRemoved,
+        deid_categories: prepared.categories,
+        complaint_key: complaintKey(prepared.chiefComplaint),
+    };
 }
 
 /**

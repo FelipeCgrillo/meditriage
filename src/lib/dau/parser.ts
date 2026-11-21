@@ -1,4 +1,4 @@
-import type { DAURecord, DAUAgeGroup, DAUSex, ESILevel } from '@/lib/dau/types';
+import type { DAURecord, DAUAgeGroup, DAUOutcome, DAUSex, ESILevel } from '@/lib/dau/types';
 
 /**
  * Parser de registros DAU retrospectivos desde JSON o CSV.
@@ -7,7 +7,7 @@ import type { DAURecord, DAUAgeGroup, DAUSex, ESILevel } from '@/lib/dau/types';
  * RESTRICCIÓN METODOLÓGICA (no negociable):
  *   El parser SOLO extrae los campos que pueden entrar al modelo
  *   (chief_complaint + reported_symptoms + sex/age) más el gold standard
- *   (nurse_esi). Cualquier columna de signos vitales instrumentados del DAU
+ *   (tens_esi) y el destino al egreso (outcome). Cualquier columna de signos vitales instrumentados del DAU
  *   (PA, FC, FR, temperatura, SatO2, dolor medido) se IGNORA por completo: ni
  *   siquiera se lee a una estructura intermedia, para que sea imposible
  *   inyectarla al CMD aguas abajo.
@@ -19,6 +19,8 @@ export interface DAUParseResult {
     records: DAURecord[];
     /** Errores no fatales: filas descartadas con su motivo. */
     errors: DAUParseError[];
+    /** Advertencias: filas conservadas con algún dato no reconocido. */
+    warnings?: DAUParseError[];
 }
 
 export interface DAUParseError {
@@ -85,17 +87,48 @@ const HEADER_ALIASES: Record<string, keyof DAURecord> = {
     antecedentes: 'reported_symptoms',
     relato: 'reported_symptoms',
     descripcion: 'reported_symptoms',
-    // nurse_esi
-    nurse_esi: 'nurse_esi',
-    nurseesi: 'nurse_esi',
-    esi_enfermera: 'nurse_esi',
-    esienfermera: 'nurse_esi',
-    esi: 'nurse_esi',
-    categoria: 'nurse_esi',
-    categoria_esi: 'nurse_esi',
-    triage: 'nurse_esi',
-    nivel_triage: 'nurse_esi',
-    c1_c5: 'nurse_esi',
+    // tens_esi (comparador; se aceptan los alias antiguos de "enfermera")
+    tens_esi: 'tens_esi',
+    tensesi: 'tens_esi',
+    esi_tens: 'tens_esi',
+    categoria_tens: 'tens_esi',
+    nurse_esi: 'tens_esi',
+    nurseesi: 'tens_esi',
+    esi_enfermera: 'tens_esi',
+    esienfermera: 'tens_esi',
+    esi: 'tens_esi',
+    categoria: 'tens_esi',
+    categoria_esi: 'tens_esi',
+    categorizacion: 'tens_esi',
+    triage: 'tens_esi',
+    nivel_triage: 'tens_esi',
+    c1_c5: 'tens_esi',
+    // outcome (destino al egreso; criterio de referencia)
+    outcome: 'outcome',
+    destino: 'outcome',
+    destino_egreso: 'outcome',
+    destino_al_egreso: 'outcome',
+    egreso: 'outcome',
+    desenlace: 'outcome',
+    tipo_egreso: 'outcome',
+    condicion_egreso: 'outcome',
+    // age_band (tramo quinquenal)
+    age_band: 'age_band',
+    tramo_etario: 'age_band',
+    tramo_edad: 'age_band',
+    tramo: 'age_band',
+    edad_quinquenal: 'age_band',
+    // period (mes y año)
+    period: 'period',
+    periodo: 'period',
+    mes: 'period',
+    mes_anio: 'period',
+    mes_ano: 'period',
+    // time_band (franja horaria)
+    time_band: 'time_band',
+    franja: 'time_band',
+    franja_horaria: 'time_band',
+    turno: 'time_band',
 };
 
 /** Normaliza una cabecera: minúsculas, sin acentos, sin separadores. */
@@ -131,6 +164,54 @@ function coerceAgeGroup(value: string | null | undefined): DAUAgeGroup | null {
     if (['geriatric', 'geriatrico', 'geriátrico', 'anciano', 'adulto_mayor', 'mayor'].includes(v))
         return 'Geriatric';
     return null;
+}
+
+/**
+ * Normaliza el destino al egreso a las categorías del protocolo. El orden de
+ * las comprobaciones importa: lo más grave se evalúa primero, y "alta
+ * voluntaria" o "fuga" se clasifican como "otro" antes de evaluar "alta".
+ */
+export function coerceOutcome(value: unknown): DAUOutcome | null {
+    if (value == null) return null;
+    const v = String(value)
+        .trim()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+    if (v === '') return null;
+    if (/fallec|defunc|muert|obito/.test(v)) return 'fallecimiento';
+    if (/\b(upc|uci|uti)\b|intensiv|paciente critico|cuidados intermedios/.test(v)) return 'upc';
+    if (/trasl|mayor complejidad|otro (centro|hospital)/.test(v)) return 'traslado';
+    if (/hospitaliz|ingreso a (sala|servicio|piso)|\bsala\b|pabellon|cirugia de urgencia/.test(v)) return 'hospitalizacion';
+    if (/fuga|abandon|voluntari|rechaz|se retira/.test(v)) return 'otro';
+    if (/\balta\b|domicilio|\bcasa\b|ambulator|cesfam|\baps\b|policlin|control/.test(v)) return 'alta';
+    return null;
+}
+
+/**
+ * Interpreta un tramo etario quinquenal ("40-44", "40 a 44", "80+", "80 y
+ * más") y devuelve sus límites. Devuelve null si el texto no es un tramo.
+ */
+export function parseAgeBand(value: unknown): { lower: number; upper: number | null } | null {
+    if (value == null) return null;
+    const v = String(value).trim().toLowerCase();
+    let m = v.match(/^(\d{1,3})\s*(?:-|–|a)\s*(\d{1,3})(?:\s*a(?:ñ|n)os)?$/);
+    if (m) return { lower: Number(m[1]), upper: Number(m[2]) };
+    m = v.match(/^(\d{1,3})\s*(?:\+|y m[aá]s|o m[aá]s|\+ a(?:ñ|n)os)$/);
+    if (m) return { lower: Number(m[1]), upper: null };
+    return null;
+}
+
+/**
+ * Grupo etario a partir de un tramo quinquenal. Regla explícita para los
+ * tramos que cruzan un corte: 15-19 se asigna a adulto (el estudio incluye
+ * población general y la mayoría de ese tramo en urgencia general es mayor
+ * de edad) y 65-69 a geriátrico.
+ */
+export function ageGroupFromBand(band: { lower: number; upper: number | null }): DAUAgeGroup {
+    if (band.upper != null && band.upper < 15) return 'Pediatric';
+    if (band.lower >= 65) return 'Geriatric';
+    return 'Adult';
 }
 
 /** Deriva el grupo etario a partir de la edad en años. */
@@ -180,11 +261,17 @@ function buildRecord(
     }
 
     const recordId = coerceText(obj.record_id) ?? fallbackId;
+    // La columna "edad" puede traer años o un tramo quinquenal.
+    let ageBandText = coerceText(obj.age_band);
+    if (!ageBandText && parseAgeBand(obj.age_years)) ageBandText = coerceText(obj.age_years);
     const ageYears = coerceAge(obj.age_years);
+    const band = parseAgeBand(ageBandText);
     let ageGroup = coerceAgeGroup(obj.age_group as string | null | undefined);
+    if (!ageGroup && band) ageGroup = ageGroupFromBand(band);
     if (!ageGroup && ageYears != null) {
         ageGroup = ageGroupFromYears(ageYears);
     }
+    const outcomeRaw = coerceText(obj.outcome);
 
     const record: DAURecord = {
         record_id: recordId,
@@ -194,7 +281,12 @@ function buildRecord(
         admission_datetime: coerceText(obj.admission_datetime),
         chief_complaint: chiefComplaint,
         reported_symptoms: coerceText(obj.reported_symptoms),
-        nurse_esi: coerceEsi(obj.nurse_esi),
+        tens_esi: coerceEsi(obj.tens_esi),
+        outcome: coerceOutcome(outcomeRaw),
+        outcome_raw: outcomeRaw,
+        age_band: ageBandText,
+        period: coerceText(obj.period),
+        time_band: coerceText(obj.time_band),
     };
     return { record };
 }
@@ -207,6 +299,7 @@ function buildRecord(
 export function parseDAUJson(input: unknown): DAUParseResult {
     const records: DAURecord[] = [];
     const errors: DAUParseError[] = [];
+    const warnings: DAUParseError[] = [];
 
     // Aceptar tanto un arreglo directo como { records: [...] }.
     const arr = Array.isArray(input)
@@ -237,10 +330,13 @@ export function parseDAUJson(input: unknown): DAUParseResult {
             errors.push({ row, reason: result.error });
         } else {
             records.push(result.record);
+            if (result.record.outcome_raw && !result.record.outcome) {
+                warnings.push({ row, reason: `destino no reconocido: "${result.record.outcome_raw}" (registro conservado sin desenlace)` });
+            }
         }
     });
 
-    return { records, errors };
+    return { records, errors, warnings };
 }
 
 /**
@@ -286,6 +382,7 @@ function splitCsvLine(line: string): string[] {
 export function parseDAUCsv(text: string): DAUParseResult {
     const records: DAURecord[] = [];
     const errors: DAUParseError[] = [];
+    const warnings: DAUParseError[] = [];
 
     const lines = text
         .replace(/\r\n/g, '\n')
@@ -321,10 +418,13 @@ export function parseDAUCsv(text: string): DAUParseResult {
             errors.push({ row, reason: result.error });
         } else {
             records.push(result.record);
+            if (result.record.outcome_raw && !result.record.outcome) {
+                warnings.push({ row, reason: `destino no reconocido: "${result.record.outcome_raw}" (registro conservado sin desenlace)` });
+            }
         }
     }
 
-    return { records, errors };
+    return { records, errors, warnings };
 }
 
 /**

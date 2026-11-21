@@ -2,8 +2,13 @@ import { parseDAUJson } from '@/lib/dau/parser';
 import { classifyBatch, DEFAULT_DAU_CONCURRENCY } from '@/lib/dau/classifyBatch';
 import { summarizeDAU } from '@/lib/dau/summary';
 import type { DAUBatchResponse } from '@/lib/dau/types';
+import { requireRole } from '@/lib/auth/requireAdmin';
+import { getProtocolFingerprint } from '@/lib/ai/protocol';
 
-export const runtime = 'edge';
+export const runtime = 'nodejs';
+
+/** Máximo de registros por solicitud (el cliente envía tandas pequeñas). */
+const MAX_RECORDS_PER_REQUEST = 20;
 // El lote puede tardar: una llamada al LLM por registro.
 export const maxDuration = 300;
 
@@ -13,16 +18,20 @@ export const maxDuration = 300;
  *
  * ───────────────────────────────────────────────────────────────────────────
  * Recibe `{ records: DAURecord[] }` (o un arreglo directo). Para cada registro
- * SIMULA el chat del paciente: clasifica usando SOLO motivo de consulta +
- * síntomas relatados (texto libre) + sexo/edad. El `nurse_esi` es gold
- * standard y NUNCA entra al modelo. Devuelve `{ results, summary }` con
- * concordancia simple y matriz de confusión 5x5 (predicho vs enfermera).
+ * SIMULA el chat del paciente: clasifica usando SOLO el relato desidentificado
+ * (motivo de consulta y síntomas) + sexo/edad. El ESI TENS y el desenlace
+ * NUNCA entran al modelo. Devuelve `{ results, summary }` con
+ * concordancia simple y matriz de confusión 5x5 (herramienta frente a TENS).
  *
  * Robustez: ante body inválido → 400; sin API key → 503 explícito; cualquier
  * fallo individual de clasificación ya cae en el fallback seguro (needs_info).
  * ───────────────────────────────────────────────────────────────────────────
  */
 export async function POST(req: Request): Promise<Response> {
+    // Datos del estudio: solo investigador o administrador autenticado.
+    const auth = await requireRole(['researcher', 'admin']);
+    if (!auth.ok) return json({ error: auth.error }, auth.status);
+
     let body: unknown;
     try {
         body = await req.json();
@@ -43,6 +52,10 @@ export async function POST(req: Request): Promise<Response> {
         );
     }
 
+    if (records.length > MAX_RECORDS_PER_REQUEST) {
+        return json({ error: `Máximo ${MAX_RECORDS_PER_REQUEST} registros por solicitud.` }, 413);
+    }
+
     if (!process.env.ANTHROPIC_API_KEY) {
         console.error('[dau] ANTHROPIC_API_KEY is not configured');
         return json(
@@ -56,7 +69,12 @@ export async function POST(req: Request): Promise<Response> {
     try {
         const results = await classifyBatch(records, concurrency);
         const summary = summarizeDAU(results);
-        const payload: DAUBatchResponse = { results, summary };
+        // Datos del estudio: nada del relato queda en los logs del servidor.
+        const payload: DAUBatchResponse & { protocol: Awaited<ReturnType<typeof getProtocolFingerprint>> } = {
+            results,
+            summary,
+            protocol: await getProtocolFingerprint(),
+        };
         // Incluir errores de parseo como metadata no fatal.
         return json(errors.length > 0 ? { ...payload, parse_errors: errors } : payload, 200);
     } catch (error) {
@@ -88,10 +106,13 @@ function json(data: unknown, status: number): Response {
 
 /** GET /api/dau — health check ligero que NO llama al modelo. */
 export async function GET(): Promise<Response> {
+    const auth = await requireRole(['researcher', 'admin']);
+    if (!auth.ok) return json({ error: auth.error }, auth.status);
     return json(
         {
             ok: true,
             ai_configured: Boolean(process.env.ANTHROPIC_API_KEY),
+            protocol: await getProtocolFingerprint(),
             default_concurrency: DEFAULT_DAU_CONCURRENCY,
         },
         200,

@@ -31,13 +31,22 @@ export async function GET() {
         auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    const { data, error } = await supabaseAdmin
+    // service_role ignora RLS: el filtro por organización es obligatorio para
+    // el admin de un tenant (PRD I1 CA-01). Solo el admin de plataforma ve todo.
+    let query = supabaseAdmin
         .from('clinical_records')
         .select(
             'id, anonymous_code, symptoms_text, esi_level, nurse_override_level, nurse_validated, patient_gender, patient_age_group, consent_eligible, created_at',
         )
         .order('created_at', { ascending: false })
         .limit(500);
+    if (!auth.isPlatformAdmin) {
+        if (!auth.organizationId) {
+            return NextResponse.json({ error: 'Admin sin organización asignada.' }, { status: 403 });
+        }
+        query = query.eq('organization_id', auth.organizationId);
+    }
+    const { data, error } = await query;
 
     if (error) {
         return NextResponse.json({ error: error.message }, { status: 500 });
