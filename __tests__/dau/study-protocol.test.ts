@@ -349,3 +349,19 @@ describe('categoría derivada del texto cuando el modelo la omite', () => {
         for (const [texto, esperada] of casos) expect(normalizeComplaintCategory(texto)).toBe(esperada);
     });
 });
+
+describe('palabras clave de categoría con palabra completa', () => {
+    it('no confunde vómitos con tos, plasma con asma ni enojo con ojo', () => {
+        expect(normalizeComplaintCategory('ref/ cefalea intensa y vomitos')).toBe('neurologico');
+        expect(normalizeComplaintCategory('ref/ vomitos con sangre')).toBe('abdominal_digestivo');
+        expect(normalizeComplaintCategory('ref/ plasma')).toBe('otros');
+        expect(normalizeComplaintCategory('ref/ enojo')).toBe('otros');
+    });
+
+    it('sigue reconociendo tos, asma y ojo como palabras completas', () => {
+        expect(normalizeComplaintCategory('ref/ tos y fiebre')).toBe('respiratorio');
+        expect(normalizeComplaintCategory('ref/ asma')).toBe('respiratorio');
+        expect(normalizeComplaintCategory('ref/ dolor de ojo')).toBe('orl_oftalmologico');
+        expect(normalizeComplaintCategory('ref/ otitis')).toBe('orl_oftalmologico');
+    });
+});
