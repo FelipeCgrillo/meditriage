@@ -17,8 +17,14 @@ export const DEFAULT_ANTHROPIC_MODEL: string = 'claude-sonnet-5';
  * los parámetros de muestreo (temperature, top_p, top_k), así que la
  * consistencia se controla con el esfuerzo fijo, el prompt congelado y el
  * motor de reglas determinista.
+ *
+ * Decisión: `medium` (antes `high`) para el análisis de unos 1.500 registros.
+ * Reduce tiempo y costo por solicitud. El nivel crítico (ESI 1 y 2) no depende
+ * del razonamiento del modelo: lo asegura el motor de reglas determinista, que
+ * sobrescribe cualquier propuesta menos grave. Queda por justificar ante el CEC
+ * y en la tesis, y por medir en la corrida de prueba contra `high`.
  */
-export const ANTHROPIC_EFFORT = 'high' as const;
+export const ANTHROPIC_EFFORT = 'medium' as const;
 
 /** Tope de tokens de salida por solicitud (respuesta estructurada acotada). */
 export const ANTHROPIC_MAX_TOKENS = 16000;

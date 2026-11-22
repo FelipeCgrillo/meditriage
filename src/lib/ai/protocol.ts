@@ -1,4 +1,4 @@
-import { TRIAGE_SYSTEM_PROMPT } from '@/lib/ai/prompts';
+import { RETROSPECTIVE_ADDENDUM, TRIAGE_SYSTEM_PROMPT } from '@/lib/ai/prompts';
 import { ANTHROPIC_EFFORT, getAnthropicModelId } from '@/lib/ai/config';
 import { RULES_VERSION } from '@/lib/triage/rules';
 import { DEID_VERSION } from '@/lib/dau/deidentify';
@@ -27,7 +27,8 @@ async function sha256Hex(text: string): Promise<string> {
 export async function getProtocolFingerprint(): Promise<ProtocolFingerprint> {
     return {
         model_id: getAnthropicModelId(),
-        prompt_sha256: await sha256Hex(TRIAGE_SYSTEM_PROMPT),
+        // El análisis DAU usa el prompt base más el complemento retrospectivo.
+        prompt_sha256: await sha256Hex(TRIAGE_SYSTEM_PROMPT + RETROSPECTIVE_ADDENDUM),
         rules_version: RULES_VERSION,
         deid_version: DEID_VERSION,
         effort: ANTHROPIC_EFFORT,

@@ -42,6 +42,7 @@ export function toClassification(record: DAURecord, response: TriageResponse): D
         llm_esi: response.llm_status === 'success' ? (response.llm_esi_level ?? null) : null,
         status: response.status === 'success' ? 'success' : 'needs_info',
         model_error: modelError,
+        insufficient_info: response.insufficient_info === true,
         decision_source: response.decision_source ?? 'llm',
         matched_rule: response.matched_rule ?? null,
         rule_rationale: response.rule_rationale,

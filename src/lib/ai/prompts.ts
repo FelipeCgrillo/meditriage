@@ -85,6 +85,27 @@ Responde Únicamente con el objeto JSON. Sin acentos graves, sin "json" literal,
 
 export const ESI_SYSTEM_PROMPT = TRIAGE_SYSTEM_PROMPT;
 
+/**
+ * Complemento del prompt para el análisis retrospectivo de DAU (un solo turno).
+ *
+ * En el chat, un relato vago activa preguntas de seguimiento. En el DAU no hay
+ * segundo turno y los motivos de consulta del TENS son breves por naturaleza
+ * ("ref/ Dolor abdominal"). Con el prompt del chat, el modelo respondía
+ * needs_info en 16 de 19 registros y el estudio quedaba sin clasificar. Este
+ * complemento obliga a clasificar siempre, con la regla del peor caso, y
+ * registra la insuficiencia del relato en un indicador aparte para el análisis
+ * estratificado (diseño original de la tesis: "emite igualmente una clasificación
+ * ESI marcada con el indicador needs_info").
+ */
+export const RETROSPECTIVE_ADDENDUM = `
+### MODO RETROSPECTIVO DE UN SOLO TURNO (análisis de registros DAU)
+Estás revisando un registro ya cerrado. El texto lo redactó el personal de triage, es breve y NO existe un segundo turno para preguntar. Estas reglas REEMPLAZAN a la regla 2 (Detección de Vaguedad) y a todo uso de needs_info:
+- Responde SIEMPRE con status "success" y un esi_level entre 1 y 5. NUNCA uses status "needs_info" ni incluyas follow_up_question ni response_options.
+- Si el relato es escaso, estima el nivel con lo disponible y aplica la regla de seguridad crítica: ante duda razonable entre dos niveles, elige el más grave. Un motivo de consulta breve y sin signos de alarma (por ejemplo "dolor abdominal" o "dolor lumbar") se clasifica por los recursos esperados: ESI 3 si probablemente requiere dos o más recursos, ESI 4 si requiere uno, ESI 5 si no requiere ninguno.
+- Marca insufficient_info en true cuando el relato no alcance para clasificar con certeza porque faltan datos relevantes, y en false cuando alcance. Este indicador no cambia el nivel que asignes.
+- En extracted_features completa solo lo que el relato menciona. No asumas signos de alarma que el relato no menciona.
+`;
+
 
 /**
  * Fallback message when AI is unavailable
