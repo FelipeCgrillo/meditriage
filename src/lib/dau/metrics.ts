@@ -1,4 +1,5 @@
 import type { DAUClassification, DAUOutcome } from '@/lib/dau/types';
+import { textLengthBin } from '@/lib/dau/categories';
 import {
     mcnemarExact,
     pairedAucDeLong,
@@ -182,9 +183,8 @@ export interface StudyMetrics {
     by_complaint: StratumMetrics[];
     by_sex: StratumMetrics[];
     by_age_group: StratumMetrics[];
-    /** Relato suficiente frente a insuficiente (indicador que reemplaza a needs_info). */
-    by_info: StratumMetrics[];
-    n_insufficient_info: number;
+    /** Por longitud del relato (tramos fijados a priori): mide si más texto mejora el desempeño. */
+    by_text_length: StratumMetrics[];
 }
 
 function buildRows(results: DAUClassification[], pick: (r: DAUClassification) => number | null | undefined): PairedRow[] {
@@ -358,10 +358,9 @@ export function computeStudyMetrics(
         ablation_llm,
         sensitivity_without_vitals,
         n_vitals_removed: vitalsRemoved,
-        by_complaint: strata(results, (r) => r.complaint_key),
+        by_complaint: strata(results, (r) => r.complaint_category ?? 'sin categoría'),
         by_sex: strata(results, (r) => r.sex),
         by_age_group: strata(results, (r) => r.age_group),
-        by_info: strata(results, (r) => (r.insufficient_info ? 'relato insuficiente' : 'relato suficiente')),
-        n_insufficient_info: results.filter((r) => r.insufficient_info).length,
+        by_text_length: strata(results, (r) => textLengthBin(r.text_words)),
     };
 }

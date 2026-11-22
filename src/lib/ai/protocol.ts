@@ -2,6 +2,7 @@ import { RETROSPECTIVE_ADDENDUM, TRIAGE_SYSTEM_PROMPT } from '@/lib/ai/prompts';
 import { ANTHROPIC_EFFORT, getAnthropicModelId } from '@/lib/ai/config';
 import { RULES_VERSION } from '@/lib/triage/rules';
 import { DEID_VERSION } from '@/lib/dau/deidentify';
+import { CATEGORIES_VERSION } from '@/lib/dau/categories';
 
 /**
  * Huella del protocolo congelado del estudio. Cada corrida DAU la registra
@@ -15,6 +16,7 @@ export interface ProtocolFingerprint {
     rules_version: string;
     deid_version: string;
     effort: string;
+    categories_version: string;
 }
 
 async function sha256Hex(text: string): Promise<string> {
@@ -32,5 +34,6 @@ export async function getProtocolFingerprint(): Promise<ProtocolFingerprint> {
         rules_version: RULES_VERSION,
         deid_version: DEID_VERSION,
         effort: ANTHROPIC_EFFORT,
+        categories_version: CATEGORIES_VERSION,
     };
 }

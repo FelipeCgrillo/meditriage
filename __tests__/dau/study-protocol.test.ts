@@ -16,6 +16,7 @@ import { complaintKey, deidentifyText } from '@/lib/dau/deidentify';
 import { coerceOutcome, parseAgeBand, parseDAUCsv } from '@/lib/dau/parser';
 import { mergeReference, prepareRecords, reviewSampleIndices, toOutbound } from '@/lib/dau/review';
 import { mentionsAffirmed } from '@/lib/triage/textMatch';
+import { contentWordCount, normalizeComplaintCategory, textLengthBin } from '@/lib/dau/categories';
 import { evaluateRules } from '@/lib/triage/ruleEngine';
 import type { DAUClassification, DAUOutcome } from '@/lib/dau/types';
 
@@ -291,15 +292,33 @@ describe('exportación DAU del HMS (separada por tabulaciones)', () => {
     });
 });
 
-describe('relato insuficiente', () => {
-    it('estratifica por suficiencia del relato y cuenta los insuficientes', () => {
+describe('categoría del motivo y longitud del relato', () => {
+    it('normaliza la categoría a la lista cerrada', () => {
+        expect(normalizeComplaintCategory('dolor_toracico_cardiovascular')).toBe('dolor_toracico_cardiovascular');
+        expect(normalizeComplaintCategory('Respiratorio')).toBe('respiratorio');
+        expect(normalizeComplaintCategory('dolor abdominal')).toBe('abdominal_digestivo');
+        expect(normalizeComplaintCategory('traumatología')).toBe('traumatologico_musculoesqueletico');
+        expect(normalizeComplaintCategory('algo raro')).toBe('otros');
+        expect(normalizeComplaintCategory(null)).toBeNull();
+    });
+
+    it('cuenta palabras de contenido sin la abreviatura ref del TENS ni marcadores', () => {
+        expect(contentWordCount('ref/ Dolor abdominal')).toBe(2);
+        expect(contentWordCount('REF asmatico. dif. respiratoria')).toBe(3);
+        expect(contentWordCount('Acc. Trabajo [ESTABLECIMIENTO]. Golpe en ambas rodillas tras caída.')).toBe(8);
+        expect(textLengthBin(2)).toBe('1 a 2 palabras');
+        expect(textLengthBin(4)).toBe('3 a 4 palabras');
+        expect(textLengthBin(8)).toBe('5 o más palabras');
+    });
+
+    it('estratifica por categoría y por longitud del relato', () => {
         const rows = [
-            row('a', 3, 3, 'alta', { insufficient_info: true }),
-            row('b', 4, 4, 'alta', { insufficient_info: true }),
-            row('c', 2, 2, 'hospitalizacion'),
+            row('a', 3, 3, 'alta', { complaint_category: 'abdominal_digestivo', text_words: 2 }),
+            row('b', 4, 4, 'alta', { complaint_category: 'abdominal_digestivo', text_words: 6 }),
+            row('c', 2, 2, 'hospitalizacion', { complaint_category: 'dolor_toracico_cardiovascular', text_words: 4 }),
         ];
         const m = computeStudyMetrics(rows, { bootstrap: 0 });
-        expect(m.n_insufficient_info).toBe(2);
-        expect(m.by_info.map((s) => [s.key, s.n])).toEqual(expect.arrayContaining([['relato insuficiente', 2], ['relato suficiente', 1]]));
+        expect(m.by_complaint.map((s) => [s.key, s.n])).toEqual(expect.arrayContaining([['abdominal_digestivo', 2], ['dolor_toracico_cardiovascular', 1]]));
+        expect(m.by_text_length.map((s) => s.key).sort()).toEqual(['1 a 2 palabras', '3 a 4 palabras', '5 o más palabras']);
     });
 });
