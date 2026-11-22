@@ -6,7 +6,7 @@ Sistema de triaje asistido por inteligencia artificial para centros de atención
 
 Aplicación web desarrollada como MVP para una tesis de magíster que permite:
 - Pacientes ingresan síntomas vía texto (voz en desarrollo)
-- IA (Claude 3.5 Sonnet) analiza y clasifica según ESI
+- IA (Claude Sonnet 5, SDK oficial de Anthropic con salida estructurada) analiza y clasifica según ESI
 - Personal de enfermería valida la clasificación
 - Cumple con estándares HL7 FHIR para interoperabilidad
 
@@ -14,7 +14,7 @@ Aplicación web desarrollada como MVP para una tesis de magíster que permite:
 
 - **Frontend**: Next.js 14 (App Router), React 18, TypeScript, Tailwind CSS
 - **Backend**: Next.js API Routes (serverless)
-- **IA**: Vercel AI SDK + Anthropic Claude 3.5 Sonnet
+- **IA**: SDK oficial de Anthropic (`@anthropic-ai/sdk`), modelo `claude-sonnet-5`
 - **Base de Datos**: Supabase (PostgreSQL)
 - **Hosting**: Vercel
 - **Validación**: Zod
@@ -62,9 +62,7 @@ NEXT_PUBLIC_APP_ENV=development
 
 1. Ve a https://supabase.com y crea un nuevo proyecto
 2. En el panel de Supabase, ve a **SQL Editor**
-3. Ejecuta las migraciones en orden:
-   - Primero: `supabase/migrations/001_clinical_records.sql`
-   - Segundo: `supabase/migrations/002_fhir_mapping.sql`
+3. Ejecuta las migraciones de `supabase/migrations/` en orden numérico (001 a 014).
 
 ### 4. Ejecutar en Desarrollo
 
@@ -103,6 +101,29 @@ Abre http://localhost:3000
    - Razonamiento clínico (terminología médica)
    - Especialidad sugerida
 4. Aprueba o modifica la clasificación
+
+## 🔬 Análisis retrospectivo DAU (protocolo CEC-E-319)
+
+Ruta `/resultados/dau` (rol `researcher` o `admin`). Implementa el protocolo de la respuesta al oficio OBS-E-319-02:
+
+1. **Carga** del CSV o JSON del custodio. Columnas reconocidas: id, sexo, tramo etario quinquenal, mes, franja horaria, motivo de consulta, síntomas, categoría TENS y destino al egreso. Un Excel se exporta antes como CSV UTF 8.
+2. **Desidentificación en el navegador** (`src/lib/dau/deidentify.ts`, versión `2026.11-v1`): RUT, teléfonos, correos, direcciones, fechas, horas, nombres, grados, unidades y establecimientos. Retira signos vitales y observaciones del examinador y marca el registro para el análisis de sensibilidad.
+3. **Revisión manual obligatoria**: el 100% de los primeros 100 textos y una muestra aleatoria reproducible del 10% del resto. Nada sale del navegador antes de aprobarla.
+4. **Clasificación**: al servidor viajan solo id, relato desidentificado, sexo y grupo etario. El ESI TENS y el desenlace se quedan en el navegador.
+5. **Métricas** (`src/lib/dau/metrics.ts`):
+   - Sensibilidad para el desenlace de alta gravedad (ESI 1 a 3 cuenta como identificado), con IC de Wilson y Clopper-Pearson.
+   - Comparación pareada con McNemar.
+   - Subtriage clínicamente relevante.
+   - AUC ROC con DeLong.
+   - Kappa ponderado con IC asintótico y bootstrap.
+   - Tabla de interpretación a priori.
+   - Criterio de continuidad.
+   - Ablación del LLM aislado.
+   - Análisis sin relatos con signos vitales.
+   - Estratos por motivo, sexo y edad.
+6. **Exportes**: resultados CSV, métricas JSON y bitácora JSONL con el texto exacto enviado. La bitácora se guarda solo en el equipo con cifrado de disco.
+
+Cada corrida registra la huella del protocolo congelado: modelo, SHA-256 del prompt, versión de reglas, versión del detector y esfuerzo. El guardado rechaza mezclar versiones. Claude Sonnet 5 rechaza `temperature`, así que la consistencia se fija con el esfuerzo `high`.
 
 ## 🏥 Protocolo ESI
 

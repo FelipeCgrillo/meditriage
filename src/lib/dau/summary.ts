@@ -5,10 +5,10 @@ import type { DAUClassification, DAUSummary, ConfusionMatrix } from '@/lib/dau/t
  *
  * Función PURA: misma lista de clasificaciones → mismo resumen. No depende de
  * red, reloj ni azar. Solo cuenta sobre los campos `predicted_esi` y
- * `nurse_esi` ya presentes en cada `DAUClassification`.
+ * `tens_esi` ya presentes en cada `DAUClassification`.
  */
 
-/** Crea una matriz 5x5 de ceros (filas = predicho 1..5, cols = enfermera 1..5). */
+/** Crea una matriz 5x5 de ceros (filas = predicho 1..5, cols = TENS 1..5). */
 function emptyMatrix(): ConfusionMatrix {
     return Array.from({ length: 5 }, () => new Array<number>(5).fill(0));
 }
@@ -21,11 +21,11 @@ function isValidEsi(value: number | null | undefined): value is number {
 /**
  * Resume las clasificaciones del lote:
  *   - total, classified (success con predicted_esi), needs_info.
- *   - with_gold_standard (nurse_esi presente).
- *   - comparable (predicted_esi y nurse_esi ambos válidos 1..5).
- *   - agreements (predicted_esi === nurse_esi entre los comparables).
+ *   - with_gold_standard (tens_esi presente).
+ *   - comparable (predicted_esi y tens_esi ambos válidos 1..5).
+ *   - agreements (predicted_esi === tens_esi entre los comparables).
  *   - simple_agreement = agreements / comparable (null si comparable === 0).
- *   - confusion_matrix[p-1][n-1]: casos con predicho=p, enfermera=n.
+ *   - confusion_matrix[p-1][n-1]: casos con predicho=p, TENS=n.
  */
 export function summarizeDAU(results: DAUClassification[]): DAUSummary {
     const matrix = emptyMatrix();
@@ -43,13 +43,13 @@ export function summarizeDAU(results: DAUClassification[]): DAUSummary {
         if (r.status === 'needs_info') {
             needsInfo++;
         }
-        if (isValidEsi(r.nurse_esi)) {
+        if (isValidEsi(r.tens_esi)) {
             withGold++;
         }
-        if (isValidEsi(r.predicted_esi) && isValidEsi(r.nurse_esi)) {
+        if (isValidEsi(r.predicted_esi) && isValidEsi(r.tens_esi)) {
             comparable++;
-            matrix[r.predicted_esi - 1][r.nurse_esi - 1]++;
-            if (r.predicted_esi === r.nurse_esi) {
+            matrix[r.predicted_esi - 1][r.tens_esi - 1]++;
+            if (r.predicted_esi === r.tens_esi) {
                 agreements++;
             }
         }

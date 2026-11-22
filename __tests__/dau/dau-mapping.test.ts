@@ -17,7 +17,7 @@ const baseRecord: DAURecord = {
     reported_symptoms: 'opresión hace 1 hora',
     sex: 'M',
     age_group: 'Geriatric',
-    nurse_esi: 2,
+    tens_esi: 2,
 };
 
 function successResponse(esi: number): TriageResponse {
@@ -31,10 +31,10 @@ function successResponse(esi: number): TriageResponse {
 }
 
 describe('toClassification', () => {
-    it('copia nurse_esi como gold standard y calcula agreement=true', () => {
+    it('copia tens_esi como gold standard y calcula agreement=true', () => {
         const c = toClassification(baseRecord, successResponse(2));
         expect(c.predicted_esi).toBe(2);
-        expect(c.nurse_esi).toBe(2);
+        expect(c.tens_esi).toBe(2);
         expect(c.agreement).toBe(true);
     });
 
@@ -44,8 +44,8 @@ describe('toClassification', () => {
     });
 
     it('agreement=null cuando falta el gold standard', () => {
-        const c = toClassification({ ...baseRecord, nurse_esi: null }, successResponse(3));
-        expect(c.nurse_esi).toBeNull();
+        const c = toClassification({ ...baseRecord, tens_esi: null }, successResponse(3));
+        expect(c.tens_esi).toBeNull();
         expect(c.agreement).toBeNull();
     });
 

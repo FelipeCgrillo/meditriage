@@ -1,4 +1,8 @@
 import type { TriageFeatures } from './cmd';
+import { mentionsAffirmed } from './textMatch';
+
+/** Versión del catálogo de reglas. Cambiarla al modificar cualquier predicado. */
+export const RULES_VERSION = '2026.11-r2-negacion';
 
 /**
  * Catálogo declarativo de reglas ESI (18 reglas P1.1–P5.1).
@@ -102,7 +106,7 @@ const ESI1_RULES: ESIRule[] = [
         description: 'Sangrado masivo no controlado referido.',
         // Sangrado masivo se reporta como dolor/localización con bandera de signos
         // vitales anormales; modelado como percepción de signos vitales anormales.
-        evaluate: (f) => esAnormal(f.vital_signs_abnormal) && (f.symptom_location?.toLowerCase().includes('sangr') ?? false),
+        evaluate: (f) => esAnormal(f.vital_signs_abnormal) && mentionsAffirmed(f.symptom_location, ['sangr']),
         rationale: 'Hemorragia referida con signos vitales percibidos anormales: riesgo vital, reanimación inmediata.',
     },
     {
@@ -126,8 +130,8 @@ const ESI1_RULES: ESIRule[] = [
         conditionName: 'active_seizure',
         description: 'Convulsión activa referida.',
         evaluate: (f) =>
-            (f.symptoms_description?.toLowerCase().includes('convuls') ?? false) ||
-            (f.symptoms_description?.toLowerCase().includes('ataque epil') ?? false),
+            mentionsAffirmed(f.symptoms_description, ['convuls']) ||
+            mentionsAffirmed(f.symptoms_description, ['ataque epil']),
         rationale: 'Convulsión activa auto-referida: requiere intervención inmediata, reanimación.',
     },
 ];
@@ -143,9 +147,9 @@ const ESI2_RULES: ESIRule[] = [
         conditionName: 'high_risk_chest_pain',
         description: 'Dolor torácico de alto riesgo referido.',
         evaluate: (f) =>
-            (f.symptoms_description?.toLowerCase().includes('pecho') ?? false) ||
-            (f.symptom_location?.toLowerCase().includes('pecho') ?? false) ||
-            (f.symptoms_description?.toLowerCase().includes('torácic') ?? false),
+            mentionsAffirmed(f.symptoms_description, ['pecho']) ||
+            mentionsAffirmed(f.symptom_location, ['pecho']) ||
+            mentionsAffirmed(f.symptoms_description, ['torácic']),
         rationale: 'Dolor torácico auto-referido: alto riesgo de síndrome coronario, prioridad ESI 2.',
     },
     {
@@ -169,8 +173,8 @@ const ESI2_RULES: ESIRule[] = [
         description: 'Estado mental alterado referido (confusión, desorientación).',
         evaluate: (f) =>
             f.consciousness_reported === 'anormal' ||
-            (f.symptoms_description?.toLowerCase().includes('confus') ?? false) ||
-            (f.symptoms_description?.toLowerCase().includes('desorient') ?? false),
+            mentionsAffirmed(f.symptoms_description, ['confus']) ||
+            mentionsAffirmed(f.symptoms_description, ['desorient']),
         rationale: 'Alteración del estado mental auto-referida: prioridad ESI 2.',
     },
     {
@@ -179,9 +183,12 @@ const ESI2_RULES: ESIRule[] = [
         conditionName: 'head_trauma_with_loc',
         description: 'Traumatismo craneal con pérdida de conciencia referida.',
         evaluate: (f) => {
-            const d = f.symptoms_description?.toLowerCase() ?? '';
-            const golpeCabeza = d.includes('golpe') && (d.includes('cabeza') || d.includes('craneal'));
-            const perdioConciencia = d.includes('desmay') || d.includes('perd') && d.includes('conciencia');
+            const d = f.symptoms_description;
+            const golpeCabeza =
+                mentionsAffirmed(d, ['golpe']) &&
+                mentionsAffirmed(d, ['cabeza', 'craneal']);
+            const perdioConciencia = mentionsAffirmed(d, ['desmay']) ||
+                (mentionsAffirmed(d, ['perd']) && mentionsAffirmed(d, ['conciencia']));
             return golpeCabeza && perdioConciencia;
         },
         rationale: 'Traumatismo craneal con pérdida de conciencia auto-referida: prioridad ESI 2.',
@@ -193,10 +200,10 @@ const ESI2_RULES: ESIRule[] = [
         description: 'Dolor abdominal severo referido.',
         evaluate: (f) => {
             const abdominal =
-                (f.symptom_location?.toLowerCase().includes('abdom') ?? false) ||
-                (f.symptoms_description?.toLowerCase().includes('abdom') ?? false) ||
-                (f.symptoms_description?.toLowerCase().includes('vientre') ?? false) ||
-                (f.symptoms_description?.toLowerCase().includes('barriga') ?? false);
+                mentionsAffirmed(f.symptom_location, ['abdom']) ||
+                mentionsAffirmed(f.symptoms_description, ['abdom']) ||
+                mentionsAffirmed(f.symptoms_description, ['vientre']) ||
+                mentionsAffirmed(f.symptoms_description, ['barriga']);
             const severo = typeof f.pain_severity === 'number' && f.pain_severity >= 7;
             return abdominal && severo;
         },

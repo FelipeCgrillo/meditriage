@@ -58,3 +58,38 @@ export async function requireAdmin(): Promise<
         isPlatformAdmin: profile.organization_id == null,
     };
 }
+
+/**
+ * Verifica sesión, cuenta activa y pertenencia a uno de los roles indicados.
+ * Para endpoints no administrativos que procesan datos del estudio (DAU).
+ */
+export async function requireRole(roles: string[]): Promise<
+    | { ok: true; userId: string; role: string; organizationId: string | null }
+    | { ok: false; status: number; error: string }
+> {
+    const supabase = await createSupabaseServerClient();
+    const {
+        data: { user },
+        error: authError,
+    } = await supabase.auth.getUser();
+    if (authError || !user) return { ok: false, status: 401, error: 'No autenticado.' };
+
+    const { data: profile, error: profileError } = await supabase
+        .from('user_profiles')
+        .select('role, organization_id, is_active, must_change_password')
+        .eq('id', user.id)
+        .single();
+    if (profileError || !profile || !roles.includes(profile.role)) {
+        return { ok: false, status: 403, error: 'Rol no autorizado para esta operación.' };
+    }
+    if (profile.is_active === false) return { ok: false, status: 403, error: 'Cuenta desactivada.' };
+    if (profile.must_change_password === true) {
+        return { ok: false, status: 403, error: 'Debe cambiar su contraseña antes de operar.' };
+    }
+    return {
+        ok: true,
+        userId: user.id,
+        role: profile.role as string,
+        organizationId: (profile.organization_id as string | null) ?? null,
+    };
+}

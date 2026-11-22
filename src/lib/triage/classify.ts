@@ -1,10 +1,8 @@
-import { streamObject } from 'ai';
-import { createAnthropic } from '@ai-sdk/anthropic';
 import { TRIAGE_SYSTEM_PROMPT } from '@/lib/ai/prompts';
-import { getAnthropicModelId } from '@/lib/ai/config';
 import { sanitizeForAI } from '@/lib/utils/pii-filter';
 import { FALLBACK_PAYLOAD } from '@/lib/ai/safe-stream';
-import { TriageResponseSchema, type TriageResponse } from '@/lib/ai/schemas';
+import type { TriageModelOutput, TriageResponse } from '@/lib/ai/schemas';
+import { callTriageModel } from '@/lib/ai/triageModel';
 import { evaluateRules } from '@/lib/triage/ruleEngine';
 import type { CMDFeatures } from '@/lib/triage/cmd';
 import {
@@ -18,7 +16,7 @@ import {
  * Centraliza la lógica que antes vivía embebida en
  * `src/app/api/triage/route.ts`:
  *   1. Extracción estructurada de las features del CMD por el LLM
- *      (`streamObject` + `TriageResponseSchema`).
+ *      (SDK oficial de Anthropic, `callTriageModel`).
  *   2. Validación REAL con `safeParse`.
  *   3. Salvaguarda determinista (`evaluateRules` + `applyRuleEngineSafeguard`).
  *
@@ -73,15 +71,18 @@ Usa estos datos para tus decisiones clínicas. NO los preguntes de nuevo. NO for
  * determinista). No depende de azar, reloj ni red.
  */
 export function applyRuleEngineSafeguard(
-    llmResponse: TriageResponse,
+    llmResponse: TriageResponse | TriageModelOutput,
     options: { retrospective?: boolean } = {},
 ): TriageResponse {
     const features = (llmResponse.extracted_features ?? {}) as CMDFeatures;
     const evaluation = evaluateRules(features, { retrospective: options.retrospective });
 
-    // Punto de partida: lo que propuso el LLM.
+    // Punto de partida: lo que propuso el LLM. Se conserva su propuesta
+    // original (llm_esi_level / llm_status) para el análisis de ablación.
     const merged: TriageResponse = {
         ...llmResponse,
+        llm_esi_level: llmResponse.esi_level ?? null,
+        llm_status: llmResponse.status,
         matched_rule: evaluation.matchedRule,
         rule_rationale: evaluation.rationale,
         decision_source: 'llm',
@@ -179,72 +180,21 @@ export function buildSimulatedUserMessage(input: ClassifyFromTextInput): string 
  * Internamente:
  *   - Construye el mensaje de usuario simulado (motivo + síntomas).
  *   - Sanitiza PII antes de enviarlo al modelo.
- *   - Llama a `streamObject` con `schema: TriageResponseSchema` (temperature 0.1).
- *   - DRENA el stream para forzar la resolución del objeto (ver nota de regresión).
- *   - Valida con `safeParse`; si falla → payload de fallback seguro.
+ *   - Llama al modelo con salida estructurada validada por Zod.
+ *   - Si falla → payload de fallback seguro.
  *   - Corre el safeguard híbrido determinista.
- *
- * ───────────────────────────────────────────────────────────────────────────
- * NOTA DE REGRESIÓN (chat colgado en "Analizando síntomas…"):
- *   `streamObject(...).object` es una promesa que SOLO se resuelve cuando el
- *   `originalStream` del resultado se consume (la resolución ocurre dentro del
- *   `transform`/`flush` del stream, ver node_modules/ai/dist/index.mjs). Si se
- *   hace `await result.object` SIN consumir ningún stream, la promesa nunca
- *   resuelve y el endpoint queda colgado → el cliente nunca recibe frames y se
- *   queda en "Analizando síntomas…". Aquí drenamos `partialObjectStream` para
- *   empujar la generación y permitir que `result.object` resuelva.
- * ───────────────────────────────────────────────────────────────────────────
  */
 export async function classifyFromText(input: ClassifyFromTextInput): Promise<TriageResponse> {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
-        // Sin API key no podemos clasificar; devolvemos el fallback seguro.
-        return { ...(FALLBACK_PAYLOAD as unknown as TriageResponse) };
-    }
-
     const simulated = buildSimulatedUserMessage(input);
     const sanitized = sanitizeForAI(simulated);
-
-    const anthropic = createAnthropic({ apiKey });
-    const modelId = getAnthropicModelId();
     const demographicsSystemMessage = buildDemographicsSystemMessage(input.gender, input.ageGroup);
 
-    try {
-        const result = await streamObject({
-            model: anthropic(modelId),
-            schema: TriageResponseSchema,
-            system: `${TRIAGE_SYSTEM_PROMPT}\n\n${demographicsSystemMessage}`,
-            messages: [{ role: 'user', content: sanitized }],
-            temperature: 0.1,
-        });
-
-        // Drenar el stream para DRIVE la generación (ver nota de regresión).
-        // No usamos los parciales; solo necesitamos que el transform corra y
-        // resuelva `result.object`.
-        // eslint-disable-next-line no-empty
-        for await (const _partial of result.partialObjectStream) {
-            void _partial;
-        }
-
-        const raw = await result.object;
-        const parsed = TriageResponseSchema.safeParse(raw);
-        if (!parsed.success) {
-            console.error('[classify] safeParse falló sobre la salida del modelo', {
-                model: modelId,
-                issues: parsed.error.issues.slice(0, 5),
-            });
-            return { ...(FALLBACK_PAYLOAD as unknown as TriageResponse) };
-        }
-
-        return applyRuleEngineSafeguard(parsed.data, { retrospective: input.retrospective });
-    } catch (err) {
-        const e = err as { name?: string; message?: string; statusCode?: number } | null;
-        console.error('[classify] provider/validation error', {
-            model: modelId,
-            name: e?.name,
-            status: e?.statusCode,
-            message: e?.message,
-        });
+    const result = await callTriageModel({
+        system: `${TRIAGE_SYSTEM_PROMPT}\n\n${demographicsSystemMessage}`,
+        messages: [{ role: 'user', content: sanitized }],
+    });
+    if (!result.ok) {
         return { ...(FALLBACK_PAYLOAD as unknown as TriageResponse) };
     }
+    return applyRuleEngineSafeguard(result.data, { retrospective: input.retrospective });
 }

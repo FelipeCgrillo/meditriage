@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from 'zod/v4';
 import { CMDSchema } from '@/lib/triage/cmd';
 
 /**
@@ -140,9 +140,41 @@ export const TriageResponseSchema = z.object({
         .describe(
             'Vía de atención derivada del nivel ESI: emergency (ESI 1-2), same_day_primary_care (ESI 3), next_day_primary_care (ESI 4-5).',
         ),
+
+    // ── Trazabilidad para el análisis de ablación (server-side) ─────────
+    // Nivel y estado que propuso el LLM ANTES del safeguard determinista.
+    // Permite medir por separado el LLM aislado y el sistema integrado.
+    llm_esi_level: z
+        .number()
+        .int()
+        .min(1)
+        .max(5)
+        .nullable()
+        .optional()
+        .describe('ESI propuesto por el LLM antes del motor de reglas (server-side).'),
+    llm_status: z
+        .enum(['success', 'needs_info'])
+        .optional()
+        .describe('Estado propuesto por el LLM antes del motor de reglas (server-side).'),
 });
 
 export type TriageResponse = z.infer<typeof TriageResponseSchema>;
+
+/**
+ * Esquema que se entrega al modelo como salida estructurada. Excluye los
+ * campos que completa SOLO el servidor (motor de reglas, disposición y
+ * trazabilidad), para que el modelo no pueda rellenarlos.
+ */
+export const TriageModelOutputSchema = TriageResponseSchema.omit({
+    matched_rule: true,
+    rule_rationale: true,
+    decision_source: true,
+    disposition: true,
+    llm_esi_level: true,
+    llm_status: true,
+});
+
+export type TriageModelOutput = z.infer<typeof TriageModelOutputSchema>;
 
 /**
  * Input schema for triage API

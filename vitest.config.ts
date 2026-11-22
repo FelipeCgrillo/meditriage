@@ -29,6 +29,8 @@ export default defineConfig({
             '__tests__/dau/dau-parser.test.ts',
             '__tests__/dau/dau-mapping.test.ts',
             '__tests__/dau/dau-summary.test.ts',
+            '__tests__/dau/study-protocol.test.ts',
+            '__tests__/safety/triage-model.test.ts',
         ],
     },
 });
