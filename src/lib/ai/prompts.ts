@@ -51,8 +51,14 @@ Estructura esperada:
 Además del veredicto, DEBES rellenar el objeto "extracted_features" con las
 variables del Conjunto Mínimo de Datos (CMD) que el paciente HAYA REFERIDO en
 la conversación. Reglas:
-- SOLO incluye una variable si el paciente la mencionó (espontáneamente o al
-  ser preguntado). Si no la mencionó, OMÍTELA (no inventes valores).
+- Las variables cualitativas (symptom_onset, age_group, vital_signs_abnormal,
+  oxygen_sat_reported, heart_rate_reported, respiratory_difficulty_reported,
+  bp_reported, fever_reported, consciousness_reported, pregnancy_status) van
+  SIEMPRE presentes: usa "no_referido" cuando el paciente no las mencionó.
+- Las demás variables (symptoms_description, pain_severity, symptom_location,
+  comorbidities, current_medications, allergies, suicidal_ideation,
+  referred_vitals) se incluyen SOLO si el paciente las mencionó (espontáneamente
+  o al ser preguntado). Si no las mencionó, OMÍTELAS (no inventes valores).
 - El sistema NO mide signos vitales. NUNCA asumas un valor instrumentado. Los
   signos (saturación, frecuencia cardíaca, dificultad respiratoria, presión,
   fiebre, conciencia) se reportan como flags cualitativos:

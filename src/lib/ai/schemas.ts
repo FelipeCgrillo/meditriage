@@ -165,6 +165,33 @@ export type TriageResponse = z.infer<typeof TriageResponseSchema>;
  * campos que completa SOLO el servidor (motor de reglas, disposición y
  * trazabilidad), para que el modelo no pueda rellenarlos.
  */
+/**
+ * CMD que se ofrece al modelo. La salida estructurada de Anthropic limita la
+ * cantidad de parámetros opcionales del esquema, así que:
+ *   - Las variables cualitativas pasan a OBLIGATORIAS: el modelo responde
+ *     "no_referido" cuando el paciente no las mencionó. El motor de reglas ya
+ *     trata 'no_referido' y la ausencia de la clave de forma idéntica.
+ *   - consent_signed y anonymous_code (metadata) no se ofrecen al modelo.
+ */
+export const CMDModelSchema = CMDSchema.omit({ consent_signed: true, anonymous_code: true }).required({
+    symptom_onset: true,
+    age_group: true,
+    vital_signs_abnormal: true,
+    oxygen_sat_reported: true,
+    heart_rate_reported: true,
+    respiratory_difficulty_reported: true,
+    bp_reported: true,
+    fever_reported: true,
+    consciousness_reported: true,
+    pregnancy_status: true,
+});
+
+/**
+ * Esquema que se entrega al modelo como salida estructurada. Excluye los
+ * campos que completa SOLO el servidor (motor de reglas, disposición y
+ * trazabilidad) y los campos heredados que ningún consumidor usa
+ * (critical_signs, suggested_specialty).
+ */
 export const TriageModelOutputSchema = TriageResponseSchema.omit({
     matched_rule: true,
     rule_rationale: true,
@@ -172,6 +199,13 @@ export const TriageModelOutputSchema = TriageResponseSchema.omit({
     disposition: true,
     llm_esi_level: true,
     llm_status: true,
+    critical_signs: true,
+    suggested_specialty: true,
+    extracted_features: true,
+}).extend({
+    extracted_features: CMDModelSchema.describe(
+        'CMD auto-reportado extraído de la conversación. Variables cualitativas siempre presentes (no_referido si no se mencionó).',
+    ),
 });
 
 export type TriageModelOutput = z.infer<typeof TriageModelOutputSchema>;
