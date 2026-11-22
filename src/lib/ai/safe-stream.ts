@@ -117,7 +117,11 @@ export function buildSafeStreamTransformer(): TransformStream<Uint8Array, Uint8A
 /**
  * Build a fully fallback data-stream response (no upstream AI involved).
  */
-export function buildFallbackStreamResponse(payload: unknown = FALLBACK_PAYLOAD, statusCode: number = 200): Response {
+export function buildFallbackStreamResponse(
+    payload: unknown = FALLBACK_PAYLOAD,
+    statusCode: number = 200,
+    reason?: string,
+): Response {
     const json = JSON.stringify(payload);
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
@@ -131,6 +135,9 @@ export function buildFallbackStreamResponse(payload: unknown = FALLBACK_PAYLOAD,
         headers: {
             'Content-Type': 'text/plain; charset=utf-8',
             'X-Triage-Fallback': '1',
+            // Motivo técnico (p. ej. api_error_404, refusal, schema_mismatch).
+            // No contiene datos del paciente ni del proveedor: solo diagnóstico.
+            ...(reason ? { 'X-Triage-Fallback-Reason': reason.replace(/[^\x20-\x7E]/g, '').slice(0, 160) } : {}),
         },
     });
 }

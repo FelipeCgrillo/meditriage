@@ -110,7 +110,7 @@ export async function POST(req: Request) {
         const apiKey = process.env.ANTHROPIC_API_KEY;
         if (!apiKey) {
             console.error('[triage] ANTHROPIC_API_KEY is not configured');
-            return buildFallbackStreamResponse(FALLBACK_PAYLOAD);
+            return buildFallbackStreamResponse(FALLBACK_PAYLOAD, 200, 'missing_api_key');
         }
 
         // Sanitize EVERY user message so previously submitted symptoms don't
@@ -124,7 +124,7 @@ export async function POST(req: Request) {
             messages: sanitizedMessages,
         });
         if (!result.ok) {
-            return buildFallbackStreamResponse(FALLBACK_PAYLOAD);
+            return buildFallbackStreamResponse(FALLBACK_PAYLOAD, 200, result.reason);
         }
 
         // Safeguard híbrido determinista (helper compartido con DAU). Se
@@ -154,7 +154,7 @@ export async function POST(req: Request) {
             status: e?.statusCode,
             message: e?.message,
         });
-        return buildFallbackStreamResponse(FALLBACK_PAYLOAD);
+        return buildFallbackStreamResponse(FALLBACK_PAYLOAD, 200, 'unexpected_error');
     }
 }
 

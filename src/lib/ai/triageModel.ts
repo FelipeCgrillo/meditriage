@@ -81,7 +81,10 @@ export async function callTriageModel(input: {
     } catch (err) {
         if (err instanceof Anthropic.APIError) {
             console.error('[triageModel] API error', { model, status: err.status, message: err.message });
-            return { ok: false, reason: `api_error_${err.status ?? 'unknown'}`, model };
+            // Diagnóstico sin datos del paciente: estado, tipo y mensaje del proveedor.
+            const body = (err as unknown as { error?: { error?: { type?: string; message?: string } } }).error?.error;
+            const detail = `${body?.type ?? ''} ${body?.message ?? ''}`.replace(/[^A-Za-z0-9_.:\- ]/g, '').trim();
+            return { ok: false, reason: `api_error_${err.status ?? 'unknown'} ${detail}`.slice(0, 160), model };
         }
         const e = err as { name?: string; message?: string } | null;
         console.error('[triageModel] error', { model, name: e?.name, message: e?.message });
