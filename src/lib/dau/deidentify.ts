@@ -277,7 +277,10 @@ function findReviewFlags(text: string): string[] {
     if (letters.length > 0 && upper / letters.length > 0.6) return [];
 
     const flags = new Set<string>();
-    const sentences = text.split(/[.;:!?\n]+/);
+    // La abreviatura "ref" del TENS y la barra "/" delimitan frases: la primera
+    // palabra de cada una va con mayúscula por redacción, no por ser un nombre.
+    const withoutPrefix = text.replace(/^\s*(?:refiere|ref)\b[\s/.:]*/i, '');
+    const sentences = withoutPrefix.split(/[.;:!?\n/]+/);
     for (const sentence of sentences) {
         const tokens = sentence.trim().split(/\s+/).filter(Boolean);
         tokens.forEach((tok, idx) => {

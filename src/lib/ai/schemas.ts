@@ -87,12 +87,12 @@ export const TriageResponseSchema = z.object({
         .optional()
         .describe('Optional recommended medical specialty (legacy field, kept for backwards compatibility)'),
 
-    // Análisis retrospectivo (DAU): el modelo clasifica siempre y marca aquí si el
-    // relato no alcanzaba para clasificar con certeza (reemplaza a needs_info).
-    insufficient_info: z
-        .boolean()
+    // Análisis retrospectivo (DAU): categoría del motivo de consulta (lista cerrada,
+    // ver src/lib/dau/categories.ts). Se normaliza server-side.
+    complaint_category: z
+        .string()
         .optional()
-        .describe('Solo modo retrospectivo: true si el relato es insuficiente para clasificar con certeza.'),
+        .describe('Solo modo retrospectivo: categoría del motivo de consulta (lista cerrada).'),
 
     // Campos cuando status='needs_info'.
     follow_up_question: z

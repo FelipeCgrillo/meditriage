@@ -18,6 +18,8 @@
  * rutas, sin valores).
  */
 
+import { normalizeComplaintCategory } from '@/lib/dau/categories';
+
 export interface SanitizeResult {
     value: unknown;
     /** Rutas de campos corregidos ("~") o descartados ("-"). */
@@ -192,11 +194,13 @@ export function sanitizeModelOutput(raw: unknown): SanitizeResult {
             repairs.push('~esi_level');
         }
     }
-    if ('insufficient_info' in obj && typeof obj.insufficient_info !== 'boolean') {
-        const b = toBoolean(obj.insufficient_info);
-        if (b === undefined) delete obj.insufficient_info;
-        else obj.insufficient_info = b;
-        repairs.push('~insufficient_info');
+    if ('complaint_category' in obj) {
+        const c = normalizeComplaintCategory(obj.complaint_category);
+        if (c == null) delete obj.complaint_category;
+        else if (c !== obj.complaint_category) {
+            obj.complaint_category = c;
+            repairs.push('~complaint_category');
+        }
     }
     if (obj.response_options != null && !Array.isArray(obj.response_options)) {
         delete obj.response_options;

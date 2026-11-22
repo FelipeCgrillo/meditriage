@@ -1,5 +1,6 @@
 import { classifyFromText } from '@/lib/triage/classify';
 import { complaintKey, deidentifyText } from '@/lib/dau/deidentify';
+import { contentWordCount, normalizeComplaintCategory } from '@/lib/dau/categories';
 import type { DAURecord, DAUClassification } from '@/lib/dau/types';
 import type { TriageResponse } from '@/lib/ai/schemas';
 
@@ -42,7 +43,7 @@ export function toClassification(record: DAURecord, response: TriageResponse): D
         llm_esi: response.llm_status === 'success' ? (response.llm_esi_level ?? null) : null,
         status: response.status === 'success' ? 'success' : 'needs_info',
         model_error: modelError,
-        insufficient_info: response.insufficient_info === true,
+        complaint_category: normalizeComplaintCategory(response.complaint_category),
         decision_source: response.decision_source ?? 'llm',
         matched_rule: response.matched_rule ?? null,
         rule_rationale: response.rule_rationale,
@@ -101,6 +102,7 @@ export async function classifyRecord(record: DAURecord): Promise<DAUClassificati
         vitals_removed: prepared.vitalsRemoved,
         deid_categories: prepared.categories,
         complaint_key: complaintKey(prepared.chiefComplaint),
+        text_words: contentWordCount([prepared.chiefComplaint, prepared.reportedSymptoms].filter(Boolean).join('. ')),
     };
 }
 

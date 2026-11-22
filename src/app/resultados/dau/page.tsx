@@ -241,13 +241,13 @@ export default function DAUAnalysisPage() {
         if (results.length === 0) return;
         const header = [
             'record_id', 'esi_herramienta', 'esi_llm', 'esi_tens', 'desenlace', 'concordancia', 'estado',
-            'error_modelo', 'relato_insuficiente', 'origen_decision', 'regla', 'signos_vitales_retirados', 'categorias_desidentificadas',
+            'error_modelo', 'categoria_motivo', 'palabras_relato', 'origen_decision', 'regla', 'signos_vitales_retirados', 'categorias_desidentificadas',
             'motivo_normalizado',
         ];
         const rows = results.map((r) =>
             [
                 r.record_id, r.predicted_esi ?? '', r.llm_esi ?? '', r.tens_esi ?? '', r.outcome ?? '',
-                r.agreement == null ? '' : r.agreement ? 'sí' : 'no', r.status, r.model_error ? 'sí' : 'no', r.insufficient_info ? 'sí' : 'no',
+                r.agreement == null ? '' : r.agreement ? 'sí' : 'no', r.status, r.model_error ? 'sí' : 'no', r.complaint_category ?? '', r.text_words ?? '',
                 r.decision_source, r.matched_rule ?? '', r.vitals_removed ? 'sí' : 'no',
                 (r.deid_categories ?? []).join('|'), r.complaint_key ?? '',
             ]
@@ -321,8 +321,9 @@ export default function DAUAnalysisPage() {
                             <strong className="text-blue-600">Arrastra tu archivo aquí</strong> o haz clic para seleccionar
                         </span>
                         <span className="text-xs text-gray-500">
-                            Columnas reconocidas: id, sexo, tramo etario, mes, franja horaria, motivo de consulta,
-                            síntomas, categoría TENS, destino al egreso
+                            Columnas reconocidas: id, sexo, edad o tramo etario, fecha y hora de ingreso (o mes y franja),
+                            motivo de consulta, síntomas, categoría TENS y destino al egreso. La edad se reduce a tramo, la
+                            fecha a mes y la hora a franja, y la fecha de nacimiento y las fechas exactas se descartan
                         </span>
                         <input id="dau-file-input" type="file" accept=".json,.csv,.tsv,.txt,application/json,text/csv,text/tab-separated-values,text/plain" onChange={handleFile} className="hidden" />
                     </label>
@@ -658,8 +659,8 @@ function StudyPanel({ study }: { study: StudyMetrics }) {
                     <div className="mt-2"><BlockTable block={study.sensitivity_without_vitals} /></div>
                 </details>
             )}
-            <StrataTable title={`Por suficiencia del relato (${study.n_insufficient_info} insuficiente(s))`} rows={study.by_info} />
-            <StrataTable title="Por motivo de consulta" rows={study.by_complaint} />
+            <StrataTable title="Por categoría de motivo de consulta" rows={study.by_complaint} />
+            <StrataTable title="Por longitud del relato" rows={study.by_text_length} />
             <StrataTable title="Por sexo" rows={study.by_sex} />
             <StrataTable title="Por grupo etario" rows={study.by_age_group} />
         </section>
