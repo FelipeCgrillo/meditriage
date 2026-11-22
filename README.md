@@ -62,7 +62,7 @@ NEXT_PUBLIC_APP_ENV=development
 
 1. Ve a https://supabase.com y crea un nuevo proyecto
 2. En el panel de Supabase, ve a **SQL Editor**
-3. Ejecuta las migraciones de `supabase/migrations/` en orden numérico (001 a 013).
+3. Ejecuta las migraciones de `supabase/migrations/` en orden numérico (001 a 014).
 
 ### 4. Ejecutar en Desarrollo
 
