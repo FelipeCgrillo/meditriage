@@ -77,7 +77,7 @@ describe('callTriageModel (SDK oficial)', () => {
         mockClient(null, 'refusal');
         expect(await callTriageModel({ system: 's', messages: [{ role: 'user', content: 'x' }] })).toMatchObject({ ok: false, reason: 'refusal' });
         mockClient({ status: 'otro' });
-        expect(await callTriageModel({ system: 's', messages: [{ role: 'user', content: 'x' }] })).toMatchObject({ ok: false, reason: 'schema_mismatch' });
+        expect(await callTriageModel({ system: 's', messages: [{ role: 'user', content: 'x' }] })).toMatchObject({ ok: false, reason: expect.stringContaining('schema_mismatch') });
         mockClient('no es json');
         expect(await callTriageModel({ system: 's', messages: [{ role: 'user', content: 'x' }] })).toMatchObject({ ok: false, reason: 'no_json' });
     });

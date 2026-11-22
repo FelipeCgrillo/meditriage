@@ -87,7 +87,12 @@ export async function callTriageModel(input: {
                 model,
                 issues: parsed.error.issues.slice(0, 5),
             });
-            return { ok: false, reason: 'schema_mismatch', model };
+            // Solo rutas y códigos de los campos inválidos, nunca sus valores.
+            const where = parsed.error.issues
+                .slice(0, 4)
+                .map((i) => `${i.path.join('.')}:${i.code}`)
+                .join(',');
+            return { ok: false, reason: `schema_mismatch ${where}`, model };
         }
         return { ok: true, data: parsed.data, model: response.model ?? model };
     } catch (err) {
