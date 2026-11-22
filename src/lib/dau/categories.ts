@@ -10,7 +10,7 @@
  * Cambiar esta lista cambia el análisis: versionar con CATEGORIES_VERSION.
  */
 
-export const CATEGORIES_VERSION = '2026.11-c1';
+export const CATEGORIES_VERSION = '2026.11-c2';
 
 export const COMPLAINT_CATEGORIES = [
     'dolor_toracico_cardiovascular',
@@ -51,16 +51,18 @@ export function normalizeComplaintCategory(value: unknown): ComplaintCategory | 
     const s = plain(value);
     if (!s) return null;
     if (/toraci|torax|costal|pecho|cardio|corazon|palpit/.test(s)) return 'dolor_toracico_cardiovascular';
-    if (/respirat|asma|disnea|tos\b|pulmon/.test(s)) return 'respiratorio';
+    if (/respirat|\basma|disnea|\btos\b|pulmon|bronqu|neumon/.test(s)) return 'respiratorio';
+    if (/neuro|cefalea|convuls|vertigo|conciencia|confusion|cabeza/.test(s)) return 'neurologico';
     if (/abdom|digest|gastro|estomac|vomit|diarrea|nausea/.test(s)) return 'abdominal_digestivo';
     if (/genito|urin|orina|prostat|renal|ginec/.test(s)) return 'genitourinario';
-    if (/trauma|muscul|esguince|fractura|lumbar|rodilla|torsion|golpe|caida|dolor osteo|pierna|brazo|cuello|columna|hombro|tobillo/.test(s)) return 'traumatologico_musculoesqueletico';
-    if (/neuro|cefalea|mareo|convuls|vertigo|conciencia|confusion|cabeza/.test(s)) return 'neurologico';
-    if (/orl|oido|garganta|nariz|oftalm|ojo|visual/.test(s)) return 'orl_oftalmologico';
+    if (/trauma|muscul|esguince|fractura|lumbar|rodilla|torsion|golpe|caida|dolor osteo|pierna|brazo|cuello|columna|hombro|tobillo|ortoped|\bpie\b/.test(s)) return 'traumatologico_musculoesqueletico';
+    if (/\borl\b|oido|otitis|otalgia|garganta|nariz|sinusitis|oftalm|\bojo|conjuntivitis|visual/.test(s)) return 'orl_oftalmologico';
     if (/dental|diente|muela/.test(s)) return 'dental';
     if (/piel|herida|absceso|partes blandas|quemadura/.test(s)) return 'piel_partes_blandas';
     if (/psiqui|conducta|ansiedad|suicid|animo/.test(s)) return 'psiquiatrico_conducta';
     if (/fiebre|infecc|general/.test(s)) return 'fiebre_infeccioso_general';
+    // Mareo aislado: solo si no hay otro síntoma que defina la categoría.
+    if (/mareo/.test(s)) return 'neurologico';
     return 'otros';
 }
 
