@@ -50,12 +50,12 @@ export function normalizeComplaintCategory(value: unknown): ComplaintCategory | 
     if (CATEGORY_SET.has(raw)) return raw as ComplaintCategory;
     const s = plain(value);
     if (!s) return null;
-    if (/toraci|pecho|cardio|corazon|palpit/.test(s)) return 'dolor_toracico_cardiovascular';
+    if (/toraci|torax|costal|pecho|cardio|corazon|palpit/.test(s)) return 'dolor_toracico_cardiovascular';
     if (/respirat|asma|disnea|tos\b|pulmon/.test(s)) return 'respiratorio';
     if (/abdom|digest|gastro|estomac|vomit|diarrea|nausea/.test(s)) return 'abdominal_digestivo';
     if (/genito|urin|orina|prostat|renal|ginec/.test(s)) return 'genitourinario';
-    if (/trauma|muscul|esguince|fractura|lumbar|rodilla|torsion|dolor osteo/.test(s)) return 'traumatologico_musculoesqueletico';
-    if (/neuro|cefalea|mareo|convuls|vertigo/.test(s)) return 'neurologico';
+    if (/trauma|muscul|esguince|fractura|lumbar|rodilla|torsion|golpe|caida|dolor osteo|pierna|brazo|cuello|columna|hombro|tobillo/.test(s)) return 'traumatologico_musculoesqueletico';
+    if (/neuro|cefalea|mareo|convuls|vertigo|conciencia|confusion|cabeza/.test(s)) return 'neurologico';
     if (/orl|oido|garganta|nariz|oftalm|ojo|visual/.test(s)) return 'orl_oftalmologico';
     if (/dental|diente|muela/.test(s)) return 'dental';
     if (/piel|herida|absceso|partes blandas|quemadura/.test(s)) return 'piel_partes_blandas';
