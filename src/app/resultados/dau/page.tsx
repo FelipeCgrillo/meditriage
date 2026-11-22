@@ -321,8 +321,9 @@ export default function DAUAnalysisPage() {
                             <strong className="text-blue-600">Arrastra tu archivo aquí</strong> o haz clic para seleccionar
                         </span>
                         <span className="text-xs text-gray-500">
-                            Columnas reconocidas: id, sexo, tramo etario, mes, franja horaria, motivo de consulta,
-                            síntomas, categoría TENS, destino al egreso
+                            Columnas reconocidas: id, sexo, edad o tramo etario, fecha y hora de ingreso (o mes y franja),
+                            motivo de consulta, síntomas, categoría TENS y destino al egreso. La edad se reduce a tramo, la
+                            fecha a mes y la hora a franja, y la fecha de nacimiento y las fechas exactas se descartan
                         </span>
                         <input id="dau-file-input" type="file" accept=".json,.csv,.tsv,.txt,application/json,text/csv,text/tab-separated-values,text/plain" onChange={handleFile} className="hidden" />
                     </label>

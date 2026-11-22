@@ -322,3 +322,16 @@ describe('categoría del motivo y longitud del relato', () => {
         expect(m.by_text_length.map((s) => s.key).sort()).toEqual(['1 a 2 palabras', '3 a 4 palabras', '5 o más palabras']);
     });
 });
+
+describe('alerta de posibles nombres', () => {
+    it('no marca la primera palabra tras la abreviatura ref ni tras la barra', () => {
+        expect(deidentifyText('ref/ Dolor costal izq.').review_flags).toEqual([]);
+        expect(deidentifyText('REF Sangrado al orinar').review_flags).toEqual([]);
+        expect(deidentifyText('ref/ Hta / Dolor al pecho').review_flags).toEqual([]);
+        expect(deidentifyText('Ref. Torsion pie derecho').review_flags).toEqual([]);
+    });
+
+    it('sigue marcando un nombre propio en medio de la frase', () => {
+        expect(deidentifyText('ref/ dolor de cabeza segun Pedro Gonzalez').review_flags).toEqual(expect.arrayContaining(['Pedro', 'Gonzalez']));
+    });
+});
