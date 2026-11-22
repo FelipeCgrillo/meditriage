@@ -5,7 +5,7 @@ import { DEFAULT_ANTHROPIC_MODEL } from '@/lib/ai/config';
 
 type Captured = Record<string, unknown>;
 
-/** Variables cualitativas obligatorias en la salida estructurada del modelo. */
+/** Variables cualitativas del CMD que el modelo suele devolver completas. */
 const REQUIRED_FEATURES = {
     symptom_onset: 'no_referido',
     age_group: 'Adult',
@@ -19,36 +19,21 @@ const REQUIRED_FEATURES = {
     pregnancy_status: 'no_referido',
 };
 
-function mockClient(parsed: unknown, stop_reason = 'end_turn', captured: Captured[] = []) {
+/** Simula la respuesta del modelo: un bloque de texto con el JSON (o texto libre). */
+function mockClient(output: unknown, stop_reason = 'end_turn', captured: Captured[] = []) {
+    const text = typeof output === 'string' ? output : JSON.stringify(output);
     setTriageClientFactoryForTests(
         () =>
             ({
                 messages: {
-                    parse: async (params: Captured) => {
+                    create: async (params: Captured) => {
                         captured.push(params);
-                        return { stop_reason, parsed_output: parsed, model: params.model };
+                        return { stop_reason, content: [{ type: 'text', text }], model: params.model };
                     },
                 },
             }) as never,
     );
     return captured;
-}
-
-function countOptional(node: unknown): number {
-    if (!node || typeof node !== 'object') return 0;
-    const n = node as { properties?: Record<string, unknown>; required?: string[]; anyOf?: unknown[]; items?: unknown; $defs?: Record<string, unknown> };
-    let total = 0;
-    if (n.properties) {
-        const req = new Set(n.required ?? []);
-        for (const [k, v] of Object.entries(n.properties)) {
-            if (!req.has(k)) total++;
-            total += countOptional(v);
-        }
-    }
-    n.anyOf?.forEach((x) => (total += countOptional(x)));
-    if (n.items) total += countOptional(n.items);
-    Object.values(n.$defs ?? {}).forEach((d) => (total += countOptional(d)));
-    return total;
 }
 
 afterEach(() => {
@@ -72,19 +57,18 @@ describe('callTriageModel (SDK oficial)', () => {
         expect(DEFAULT_ANTHROPIC_MODEL).toBe('claude-sonnet-5');
         expect(p).not.toHaveProperty('temperature');
         expect(p).not.toHaveProperty('top_p');
-        const oc = p.output_config as {
-            effort: string;
-            format: { type: string; schema: { properties: Record<string, unknown>; required?: string[] } };
-        };
+        const oc = p.output_config as { effort: string; format?: unknown };
         expect(oc.effort).toBe('high');
-        expect(oc.format.type).toBe('json_schema');
-        // Los campos que completa el servidor no se ofrecen al modelo.
-        for (const k of ['matched_rule', 'decision_source', 'disposition', 'llm_esi_level', 'critical_signs', 'suggested_specialty']) {
-            expect(oc.format.schema.properties).not.toHaveProperty(k);
-        }
-        // La salida estructurada de Anthropic rechaza esquemas con demasiados
-        // parámetros opcionales (el despliegue falló con 34). Se mantiene acotado.
-        expect(countOptional(oc.format.schema)).toBeLessThanOrEqual(22);
+        // Sin gramática: la API rechazó el esquema del CMD por complejidad. Se valida con Zod.
+        expect(oc.format).toBeUndefined();
+    });
+
+    it('extrae el JSON aunque venga envuelto en un bloque de código o con texto alrededor', async () => {
+        process.env.ANTHROPIC_API_KEY = 'test';
+        const body = JSON.stringify({ status: 'success', esi_level: 4, reasoning: 'razonamiento clínico suficiente' });
+        mockClient('Aquí está:\n```json\n' + body + '\n```');
+        const r = await callTriageModel({ system: 's', messages: [{ role: 'user', content: 'tos' }] });
+        expect(r.ok).toBe(true);
     });
 
     it('falla de forma segura ante rechazo, sin API key o salida inválida', async () => {
@@ -94,6 +78,8 @@ describe('callTriageModel (SDK oficial)', () => {
         expect(await callTriageModel({ system: 's', messages: [{ role: 'user', content: 'x' }] })).toMatchObject({ ok: false, reason: 'refusal' });
         mockClient({ status: 'otro' });
         expect(await callTriageModel({ system: 's', messages: [{ role: 'user', content: 'x' }] })).toMatchObject({ ok: false, reason: 'schema_mismatch' });
+        mockClient('no es json');
+        expect(await callTriageModel({ system: 's', messages: [{ role: 'user', content: 'x' }] })).toMatchObject({ ok: false, reason: 'no_json' });
     });
 
     it('classifyFromText conserva el ESI del LLM y aplica el override del motor', async () => {

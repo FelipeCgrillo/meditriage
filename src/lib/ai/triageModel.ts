@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
+import { extractJSON } from '@/lib/utils/validation';
 import {
     ANTHROPIC_EFFORT,
     ANTHROPIC_MAX_TOKENS,
@@ -8,13 +8,19 @@ import {
 import { TriageModelOutputSchema, type TriageModelOutput } from '@/lib/ai/schemas';
 
 /**
- * Llamada única al modelo de triage mediante el SDK oficial de Anthropic,
- * con salida estructurada (`output_config.format`) derivada del esquema Zod.
+ * Llamada única al modelo de triage mediante el SDK oficial de Anthropic.
+ *
+ * El prompt exige un objeto JSON y nada más. La respuesta se extrae con un
+ * parser tolerante y se valida SIEMPRE con Zod (`safeParse`) antes de usarse:
+ * lo que no cumple el esquema se descarta y se emite la contingencia segura.
+ *
+ * No se usa la salida estructurada con gramática (`output_config.format`)
+ * porque la API rechaza el esquema del CMD por complejidad ("Schema is too
+ * complex"). La validación con Zod ofrece la misma garantía de forma:
+ * ninguna respuesta malformada llega a la capa de aplicación.
  *
  * Compartida por el chat del paciente (/api/triage) y el análisis
- * retrospectivo DAU (classifyFromText). La respuesta se valida SIEMPRE con
- * Zod antes de usarse. Ante cualquier falla devuelve `{ ok: false }` y el
- * llamador emite el payload de contingencia segura.
+ * retrospectivo DAU (classifyFromText).
  *
  * Resguardos del protocolo CEC (observación 6):
  *   - Solicitud independiente, sin Batch API ni Files API.
@@ -50,15 +56,12 @@ export async function callTriageModel(input: {
 
     try {
         const client = clientFactory(apiKey);
-        const response = await client.messages.parse({
+        const response = await client.messages.create({
             model,
             max_tokens: ANTHROPIC_MAX_TOKENS,
             system: input.system,
             messages: input.messages,
-            output_config: {
-                effort: ANTHROPIC_EFFORT,
-                format: zodOutputFormat(TriageModelOutputSchema),
-            },
+            output_config: { effort: ANTHROPIC_EFFORT },
         });
 
         if (response.stop_reason === 'refusal') {
@@ -69,7 +72,16 @@ export async function callTriageModel(input: {
             return { ok: false, reason: 'max_tokens', model };
         }
 
-        const parsed = TriageModelOutputSchema.safeParse(response.parsed_output);
+        const text = response.content
+            .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+            .map((b) => b.text)
+            .join('');
+        const candidate = extractJSON<unknown>(text);
+        if (candidate == null) {
+            return { ok: false, reason: 'no_json', model };
+        }
+
+        const parsed = TriageModelOutputSchema.safeParse(candidate);
         if (!parsed.success) {
             console.error('[triageModel] safeParse falló', {
                 model,
