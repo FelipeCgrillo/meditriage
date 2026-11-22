@@ -2,7 +2,7 @@ import type { TriageFeatures } from './cmd';
 import { mentionsAffirmed } from './textMatch';
 
 /** Versión del catálogo de reglas. Cambiarla al modificar cualquier predicado. */
-export const RULES_VERSION = '2026.11-r2-negacion';
+export const RULES_VERSION = '2026.11-r3-p11';
 
 /**
  * Catálogo declarativo de reglas ESI (18 reglas P1.1–P5.1).
@@ -59,8 +59,23 @@ const ESI1_RULES: ESIRule[] = [
         esiLevel: 1,
         conditionName: 'unresponsive',
         description: 'Paciente no responde / inconsciencia profunda (referido por paciente o acompañante).',
-        evaluate: (f) => f.consciousness_reported === 'anormal',
-        rationale: 'Se reporta compromiso del nivel de conciencia (auto-reporte/acompañante): requiere reanimación inmediata.',
+        // Solo inconsciencia o ausencia de respuesta referidas en el relato. Una
+        // alteración de conciencia sin eso (confusión, desorientación, síncope)
+        // corresponde a P2.3 (ESI 2). Antes cualquier consciousness_reported='anormal'
+        // disparaba ESI 1 y P2.3 casi nunca actuaba (versión r2).
+        evaluate: (f) =>
+            f.consciousness_reported === 'anormal' &&
+            mentionsAffirmed(f.symptoms_description, [
+                'inconsciente',
+                'inconsciencia',
+                'no responde',
+                'no reacciona',
+                'sin respuesta',
+                'no despierta',
+                'paro cardi',
+                'paro respir',
+            ]),
+        rationale: 'Inconsciencia o ausencia de respuesta referida (auto-reporte/acompañante): requiere reanimación inmediata.',
     },
     {
         id: 'P1.2',

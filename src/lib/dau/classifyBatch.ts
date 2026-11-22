@@ -96,9 +96,16 @@ export async function classifyRecord(record: DAURecord): Promise<DAUClassificati
         ageGroup: record.age_group,
         retrospective: true,
     });
+    const base = toClassification(record, response);
+    const sentText = [prepared.chiefComplaint, prepared.reportedSymptoms].filter(Boolean).join('. ');
+    // Si el modelo omitió la categoría (ocurrió en 6 de 30 registros), se deriva
+    // del texto con palabras clave, de forma determinista, y se deja constancia.
+    const fromText = base.complaint_category ? null : normalizeComplaintCategory(sentText);
     return {
-        ...toClassification(record, response),
-        sent_text: [prepared.chiefComplaint, prepared.reportedSymptoms].filter(Boolean).join('. '),
+        ...base,
+        complaint_category: base.complaint_category ?? fromText,
+        category_derived: fromText != null,
+        sent_text: sentText,
         vitals_removed: prepared.vitalsRemoved,
         deid_categories: prepared.categories,
         complaint_key: complaintKey(prepared.chiefComplaint),

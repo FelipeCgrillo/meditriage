@@ -241,13 +241,13 @@ export default function DAUAnalysisPage() {
         if (results.length === 0) return;
         const header = [
             'record_id', 'esi_herramienta', 'esi_llm', 'esi_tens', 'desenlace', 'concordancia', 'estado',
-            'error_modelo', 'categoria_motivo', 'palabras_relato', 'origen_decision', 'regla', 'signos_vitales_retirados', 'categorias_desidentificadas',
+            'error_modelo', 'categoria_motivo', 'categoria_derivada', 'palabras_relato', 'origen_decision', 'regla', 'signos_vitales_retirados', 'categorias_desidentificadas',
             'motivo_normalizado',
         ];
         const rows = results.map((r) =>
             [
                 r.record_id, r.predicted_esi ?? '', r.llm_esi ?? '', r.tens_esi ?? '', r.outcome ?? '',
-                r.agreement == null ? '' : r.agreement ? 'sí' : 'no', r.status, r.model_error ? 'sí' : 'no', r.complaint_category ?? '', r.text_words ?? '',
+                r.agreement == null ? '' : r.agreement ? 'sí' : 'no', r.status, r.model_error ? 'sí' : 'no', r.complaint_category ?? '', r.category_derived ? 'sí' : 'no', r.text_words ?? '',
                 r.decision_source, r.matched_rule ?? '', r.vitals_removed ? 'sí' : 'no',
                 (r.deid_categories ?? []).join('|'), r.complaint_key ?? '',
             ]

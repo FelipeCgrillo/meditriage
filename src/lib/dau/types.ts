@@ -96,6 +96,8 @@ export interface DAUClassification {
     sent_text?: string;
     /** Categoría del motivo de consulta (lista cerrada, asignada por el modelo). */
     complaint_category?: string | null;
+    /** true si la categoría se derivó del texto porque el modelo no la entregó. */
+    category_derived?: boolean;
     /** Palabras de contenido del relato enviado (medida objetiva de su riqueza). */
     text_words?: number;
     /** true si se retiraron signos vitales u observaciones del examinador. */

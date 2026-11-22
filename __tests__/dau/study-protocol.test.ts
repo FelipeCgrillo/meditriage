@@ -335,3 +335,17 @@ describe('alerta de posibles nombres', () => {
         expect(deidentifyText('ref/ dolor de cabeza segun Pedro Gonzalez').review_flags).toEqual(expect.arrayContaining(['Pedro', 'Gonzalez']));
     });
 });
+
+describe('categoría derivada del texto cuando el modelo la omite', () => {
+    it('asigna categoría a los seis casos que el modelo dejó vacíos en la corrida sintética', () => {
+        const casos: Array<[string, string]> = [
+            ['ref/ dolor toracico opresivo', 'dolor_toracico_cardiovascular'],
+            ['ref/ vomitos, dolor pecho, mareos', 'dolor_toracico_cardiovascular'],
+            ['ref/ Dolor costal izq.', 'dolor_toracico_cardiovascular'],
+            ['Ref. Dolor oído izquierdo.', 'orl_oftalmologico'],
+            ['Acc. Trabajo [ESTABLECIMIENTO]. Golpe en ambas rodillas tras caída.', 'traumatologico_musculoesqueletico'],
+            ['ref/ cefalea leve', 'neurologico'],
+        ];
+        for (const [texto, esperada] of casos) expect(normalizeComplaintCategory(texto)).toBe(esperada);
+    });
+});

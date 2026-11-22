@@ -20,7 +20,25 @@ const ESCENARIOS: Array<{ nombre: string; features: TriageFeatures; esiEsperado:
     },
     {
         nombre: 'Inconsciencia referida → ESI 1 (P1.1)',
-        features: { consciousness_reported: 'anormal', respiratory_difficulty_reported: 'normal', suicidal_ideation: false },
+        features: { symptoms_description: 'paciente inconsciente, no responde', consciousness_reported: 'anormal', respiratory_difficulty_reported: 'normal', suicidal_ideation: false },
+        esiEsperado: 1,
+        reglaEsperada: 'P1.1',
+    },
+    {
+        nombre: 'Conciencia alterada sin inconsciencia (confusión) → ESI 2 (P2.3)',
+        features: { symptoms_description: 'confusión, no reconoce a la familia', consciousness_reported: 'anormal', respiratory_difficulty_reported: 'normal', suicidal_ideation: false },
+        esiEsperado: 2,
+        reglaEsperada: 'P2.3',
+    },
+    {
+        nombre: 'Síncope (pérdida de conciencia breve) → ESI 2 y no ESI 1',
+        features: { symptoms_description: 'perdida de conciencia', consciousness_reported: 'anormal', respiratory_difficulty_reported: 'normal', suicidal_ideation: false },
+        esiEsperado: 2,
+        reglaEsperada: 'P2.3',
+    },
+    {
+        nombre: 'Paro cardiorrespiratorio → ESI 1 (P1.1)',
+        features: { symptoms_description: 'paro cardiorrespiratorio', consciousness_reported: 'anormal', respiratory_difficulty_reported: 'anormal', suicidal_ideation: false },
         esiEsperado: 1,
         reglaEsperada: 'P1.1',
     },

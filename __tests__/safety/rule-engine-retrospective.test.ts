@@ -49,6 +49,7 @@ describe('Motor de reglas — modo retrospectivo (Vía B)', () => {
 
     it('Vía B NO relaja la seguridad: inconsciencia referida sigue siendo ESI 1', () => {
         const critico: TriageFeatures = {
+            symptoms_description: 'paciente inconsciente',
             consciousness_reported: 'anormal',
             respiratory_difficulty_reported: 'normal',
             suicidal_ideation: false,
