@@ -241,13 +241,13 @@ export default function DAUAnalysisPage() {
         if (results.length === 0) return;
         const header = [
             'record_id', 'esi_herramienta', 'esi_llm', 'esi_tens', 'desenlace', 'concordancia', 'estado',
-            'error_modelo', 'origen_decision', 'regla', 'signos_vitales_retirados', 'categorias_desidentificadas',
+            'error_modelo', 'relato_insuficiente', 'origen_decision', 'regla', 'signos_vitales_retirados', 'categorias_desidentificadas',
             'motivo_normalizado',
         ];
         const rows = results.map((r) =>
             [
                 r.record_id, r.predicted_esi ?? '', r.llm_esi ?? '', r.tens_esi ?? '', r.outcome ?? '',
-                r.agreement == null ? '' : r.agreement ? 'sí' : 'no', r.status, r.model_error ? 'sí' : 'no',
+                r.agreement == null ? '' : r.agreement ? 'sí' : 'no', r.status, r.model_error ? 'sí' : 'no', r.insufficient_info ? 'sí' : 'no',
                 r.decision_source, r.matched_rule ?? '', r.vitals_removed ? 'sí' : 'no',
                 (r.deid_categories ?? []).join('|'), r.complaint_key ?? '',
             ]
@@ -658,6 +658,7 @@ function StudyPanel({ study }: { study: StudyMetrics }) {
                     <div className="mt-2"><BlockTable block={study.sensitivity_without_vitals} /></div>
                 </details>
             )}
+            <StrataTable title={`Por suficiencia del relato (${study.n_insufficient_info} insuficiente(s))`} rows={study.by_info} />
             <StrataTable title="Por motivo de consulta" rows={study.by_complaint} />
             <StrataTable title="Por sexo" rows={study.by_sex} />
             <StrataTable title="Por grupo etario" rows={study.by_age_group} />

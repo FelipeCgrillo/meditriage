@@ -151,3 +151,20 @@ describe('normalización de la salida del modelo (sin gramática)', () => {
         expect(value).not.toHaveProperty('disposition');
     });
 });
+
+describe('modo retrospectivo clasifica siempre', () => {
+    it('agrega el complemento retrospectivo al prompt solo en DAU y no en el chat', async () => {
+        process.env.ANTHROPIC_API_KEY = 'test';
+        const out = { status: 'success', esi_level: 3, reasoning: 'estimación por recursos esperados', insufficient_info: true, extracted_features: { consciousness_reported: 'normal', respiratory_difficulty_reported: 'normal', suicidal_ideation: false } };
+        const dau = mockClient(out);
+        const r = await classifyFromText({ chiefComplaint: 'ref/ Dolor abdominal', retrospective: true });
+        expect(String(dau[0].system)).toContain('MODO RETROSPECTIVO DE UN SOLO TURNO');
+        expect(r.status).toBe('success');
+        expect(r.esi_level).toBe(3);
+        expect(r.insufficient_info).toBe(true);
+
+        const chat = mockClient(out);
+        await classifyFromText({ chiefComplaint: 'dolor abdominal' });
+        expect(String(chat[0].system)).not.toContain('MODO RETROSPECTIVO');
+    });
+});

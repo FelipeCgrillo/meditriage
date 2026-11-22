@@ -147,6 +147,7 @@ export async function POST(req: Request): Promise<Response> {
             predicted_esi: r.predicted_esi,
             llm_esi: r.llm_esi ?? null,
             model_error: r.model_error ?? false,
+            insufficient_info: r.insufficient_info ?? false,
             status: r.status,
             decision_source: r.decision_source,
             matched_rule: r.matched_rule,

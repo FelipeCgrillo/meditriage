@@ -290,3 +290,16 @@ describe('exportación DAU del HMS (separada por tabulaciones)', () => {
         expect(complaintKey('ref/ Dolor abdominal')).toBe('dolor abdominal');
     });
 });
+
+describe('relato insuficiente', () => {
+    it('estratifica por suficiencia del relato y cuenta los insuficientes', () => {
+        const rows = [
+            row('a', 3, 3, 'alta', { insufficient_info: true }),
+            row('b', 4, 4, 'alta', { insufficient_info: true }),
+            row('c', 2, 2, 'hospitalizacion'),
+        ];
+        const m = computeStudyMetrics(rows, { bootstrap: 0 });
+        expect(m.n_insufficient_info).toBe(2);
+        expect(m.by_info.map((s) => [s.key, s.n])).toEqual(expect.arrayContaining([['relato insuficiente', 2], ['relato suficiente', 1]]));
+    });
+});

@@ -192,6 +192,12 @@ export function sanitizeModelOutput(raw: unknown): SanitizeResult {
             repairs.push('~esi_level');
         }
     }
+    if ('insufficient_info' in obj && typeof obj.insufficient_info !== 'boolean') {
+        const b = toBoolean(obj.insufficient_info);
+        if (b === undefined) delete obj.insufficient_info;
+        else obj.insufficient_info = b;
+        repairs.push('~insufficient_info');
+    }
     if (obj.response_options != null && !Array.isArray(obj.response_options)) {
         delete obj.response_options;
         repairs.push('-response_options');

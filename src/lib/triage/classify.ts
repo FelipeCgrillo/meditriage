@@ -1,4 +1,4 @@
-import { TRIAGE_SYSTEM_PROMPT } from '@/lib/ai/prompts';
+import { RETROSPECTIVE_ADDENDUM, TRIAGE_SYSTEM_PROMPT } from '@/lib/ai/prompts';
 import { sanitizeForAI } from '@/lib/utils/pii-filter';
 import { FALLBACK_PAYLOAD } from '@/lib/ai/safe-stream';
 import type { TriageModelOutput, TriageResponse } from '@/lib/ai/schemas';
@@ -190,7 +190,7 @@ export async function classifyFromText(input: ClassifyFromTextInput): Promise<Tr
     const demographicsSystemMessage = buildDemographicsSystemMessage(input.gender, input.ageGroup);
 
     const result = await callTriageModel({
-        system: `${TRIAGE_SYSTEM_PROMPT}\n\n${demographicsSystemMessage}`,
+        system: `${TRIAGE_SYSTEM_PROMPT}\n\n${input.retrospective ? `${RETROSPECTIVE_ADDENDUM}\n\n` : ''}${demographicsSystemMessage}`,
         messages: [{ role: 'user', content: sanitized }],
     });
     if (!result.ok) {

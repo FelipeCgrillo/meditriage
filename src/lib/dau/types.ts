@@ -94,6 +94,8 @@ export interface DAUClassification {
     outcome?: DAUOutcome | null;
     /** Texto exacto enviado al modelo (bitácora de desidentificación). */
     sent_text?: string;
+    /** true si el modelo marcó el relato como insuficiente para clasificar con certeza. */
+    insufficient_info?: boolean;
     /** true si se retiraron signos vitales u observaciones del examinador. */
     vitals_removed?: boolean;
     /** Categorías de identificadores sustituidos en el relato. */
