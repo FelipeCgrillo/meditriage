@@ -19,7 +19,7 @@
  * profundidad (es idempotente sobre su propia salida).
  */
 
-export const DEID_VERSION = '2026.11-v2';
+export const DEID_VERSION = '2026.11-v3';
 
 export type DeidCategory =
     | 'rut'
@@ -104,6 +104,14 @@ const FACILITIES = [
     'posta', 'centro médico', 'centro medico', 'mutual', 'achs', 'ist', 'hms', 'hosmil',
 ];
 const RELATIONS = ['paciente', 'pcte.', 'hijo', 'hija', 'esposo', 'esposa', 'madre', 'padre', 'hermano', 'hermana', 'familiar'];
+/** Verbos administrativos que preceden a "por <nombre>". */
+const ADMIN_VERBS = [
+    'autorizado', 'autorizada', 'autoriza', 'firmado', 'firmada', 'solicitado', 'solicitada', 'indicado', 'indicada',
+    'atendido', 'atendida', 'informado', 'informada', 'entregado', 'entregada', 'recibido', 'recibida', 'visado',
+    'visada', 'derivado', 'derivada', 'dado', 'dada',
+];
+/** Nombre en formato título o en mayúsculas (Roxana, GUIÑAZU). */
+const ANY_NAME = '(?:[A-ZÁÉÍÓÚÑ][a-záéíóúüñ]+|[A-ZÁÉÍÓÚÑ]{3,})';
 /** Nombre en formato título (Juan), no en mayúsculas sostenidas. */
 const TITLE = '[A-ZÁÉÍÓÚÑ][a-záéíóúüñ]+';
 
@@ -171,6 +179,17 @@ const RULES: Rule[] = [
         // Tratamiento (Sr., Dra., Don) seguido de uno a tres nombres propios.
         pattern: new RegExp(
             `(?<![A-Za-zÁÉÍÓÚÑáéíóúñ])(?:${HONORIFICS.map(ci).join('|')})\\s+(${CAP})(?:\\s+${CAP}){0,2}`,
+            'g',
+        ),
+        replacement: '[NOMBRE]',
+        guard: (_m, first) => !NOT_A_NAME.has(plain(first)),
+    },
+    {
+        category: 'nombre',
+        // Frase administrativa "autorizado por <Nombre Apellido>" (también en mayúsculas).
+        // Detectado en la revisión manual del archivo real: "autorizado por Roxana ...".
+        pattern: new RegExp(
+            `(?<![A-Za-zÁÉÍÓÚÑáéíóúñ])(?:${ADMIN_VERBS.map(ci).join('|')})\\s+${ci('por')}\\s+(${ANY_NAME})(?:\\s+${ANY_NAME}){0,2}`,
             'g',
         ),
         replacement: '[NOMBRE]',

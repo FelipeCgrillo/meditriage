@@ -18,7 +18,8 @@ import { mergeReference, prepareRecords, reviewSampleIndices, toOutbound } from 
 import { mentionsAffirmed } from '@/lib/triage/textMatch';
 import { contentWordCount, normalizeComplaintCategory, textLengthBin } from '@/lib/dau/categories';
 import { evaluateRules } from '@/lib/triage/ruleEngine';
-import type { DAUClassification, DAUOutcome } from '@/lib/dau/types';
+import type { DAUClassification, DAUOutcome, DAURecord } from '@/lib/dau/types';
+import { buildFrame, drawSample, suggestSampleSize, summarizeRecords } from '@/lib/dau/sampling';
 
 // ── Estadística ──────────────────────────────────────────────────────────
 describe('estadística', () => {
@@ -363,5 +364,97 @@ describe('palabras clave de categoría con palabra completa', () => {
         expect(normalizeComplaintCategory('ref/ asma')).toBe('respiratorio');
         expect(normalizeComplaintCategory('ref/ dolor de ojo')).toBe('orl_oftalmologico');
         expect(normalizeComplaintCategory('ref/ otitis')).toBe('orl_oftalmologico');
+    });
+});
+
+describe('desidentificación de frases administrativas con nombre', () => {
+    it('sustituye "autorizado por <nombre>" y no toca textos clínicos con "por"', () => {
+        const a = deidentifyText('Ref. Dato de procedimiento autorizado por Roxana Guiñazu');
+        expect(a.text).not.toMatch(/Roxana|Gui/);
+        expect(a.hits.nombre).toBe(1);
+        expect(deidentifyText('AUTORIZADO POR ROXANA GUIÑAZU').text).not.toMatch(/ROXANA|GUI/);
+        expect(deidentifyText('DERIVADO POR DOLOR ABDOMINAL').text).toBe('DERIVADO POR DOLOR ABDOMINAL');
+        expect(deidentifyText('Ref. derivado por dolor toracico').text).toBe('Ref. derivado por dolor toracico');
+    });
+});
+
+describe('lectura del archivo grande del HMS', () => {
+    it('descarta registros con columnas desalineadas en vez de cruzar sus campos', () => {
+        const csv = [
+            'Sexo,Edad,MotivoConsultaAdm,Categorizacion,Destino',
+            '"Mujer","43","ref/ tos","C3 - Urgencia","Domicilio"',
+            '"Hombre","54","ref/ dolor","C3 - Urgencia","08:53:00","Domicilio"',
+            '"Mujer","60","ref/ mareo","C4 - Complejidad Baja","Hospitalización"',
+        ].join('\n');
+        const r = parseDAUCsv(csv);
+        expect(r.records).toHaveLength(2);
+        expect(r.errors).toHaveLength(1);
+        expect(r.errors[0].reason).toMatch(/columnas desalineadas/);
+    });
+
+    it('respeta saltos de línea dentro de un campo entre comillas', () => {
+        const csv = ['Sexo,Edad,MotivoConsultaAdm,Categorizacion,Destino', '"Mujer","43","ref/ tos\nfiebre alta","C3 - Urgencia","Domicilio"'].join('\n');
+        const r = parseDAUCsv(csv);
+        expect(r.errors).toHaveLength(0);
+        expect(r.records).toHaveLength(1);
+        expect(r.records[0].chief_complaint).toBe('ref/ tos\nfiebre alta');
+    });
+
+    it('trata (null) como sin desenlace sin advertencia y reconoce la derivación a otro hospital', () => {
+        const csv = [
+            'Sexo,Edad,MotivoConsultaAdm,Categorizacion,Destino',
+            '"Mujer","43","ref/ tos","C3 - Urgencia","(null)"',
+            '"Mujer","44","ref/ fx","C2 - Emergencia","Derivación Hospital Servicio de Salud"',
+        ].join('\n');
+        const r = parseDAUCsv(csv);
+        expect(r.records[0].outcome).toBeNull();
+        expect(r.warnings).toHaveLength(0);
+        expect(r.records[1].outcome).toBe('traslado');
+    });
+});
+
+describe('muestreo del estudio', () => {
+    const mk = (i: number, outcome: DAUOutcome | null, extra: Partial<DAURecord> = {}): DAURecord => ({
+        record_id: `r${i}`,
+        chief_complaint: 'ref/ dolor',
+        tens_esi: 3,
+        outcome,
+        age_group: 'Adult',
+        ...extra,
+    });
+
+    it('arma el marco y cuenta las exclusiones', () => {
+        const recs: DAURecord[] = [
+            mk(1, 'alta'),
+            mk(2, null),
+            mk(3, 'alta', { tens_esi: null }),
+            mk(4, 'alta', { age_group: 'Pediatric' }),
+            mk(5, 'hospitalizacion', { chief_complaint: 'DATO DE PRUEBA' }),
+            mk(6, 'hospitalizacion'),
+        ];
+        const f = buildFrame(recs, { excludePediatric: true });
+        expect(f.records.map((r) => r.record_id)).toEqual(['r1', 'r6']);
+        expect(f.excluded).toEqual({ sin_tens: 1, sin_desenlace: 1, registro_de_prueba: 1, menores: 1 });
+        expect(buildFrame(recs, { excludePediatric: false }).records.map((r) => r.record_id)).toEqual(['r1', 'r4', 'r6']);
+    });
+
+    it('la muestra es reproducible, sin repetidos y anidada al ampliarla', () => {
+        const frame = Array.from({ length: 500 }, (_, i) => mk(i, i % 10 === 0 ? 'hospitalizacion' : 'alta'));
+        const a = drawSample(frame, 100);
+        const b = drawSample(frame, 100);
+        const c = drawSample(frame, 150);
+        expect(a.map((r) => r.record_id)).toEqual(b.map((r) => r.record_id));
+        expect(new Set(a.map((r) => r.record_id)).size).toBe(100);
+        expect(c.slice(0, 100).map((r) => r.record_id)).toEqual(a.map((r) => r.record_id));
+        expect(drawSample(frame, 9999)).toHaveLength(500);
+    });
+
+    it('resume casos graves frente al mínimo del protocolo y sugiere un tamaño', () => {
+        const recs = [...Array.from({ length: 80 }, (_, i) => mk(i, 'hospitalizacion')), ...Array.from({ length: 20 }, (_, i) => mk(100 + i, 'alta'))];
+        const sum = summarizeRecords(recs);
+        expect(sum.high_severity).toBe(80);
+        expect(sum.meets_minimum).toBe(true);
+        expect(suggestSampleSize(0.05)).toBe(Math.ceil((73 / 0.05) * 1.15));
+        expect(suggestSampleSize(0)).toBeNull();
     });
 });

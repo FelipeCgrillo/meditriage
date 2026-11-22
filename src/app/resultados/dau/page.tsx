@@ -21,13 +21,28 @@ import {
 } from '@/lib/dau/review';
 import type { ProtocolFingerprint } from '@/lib/ai/protocol';
 import type { Interval, Proportion } from '@/lib/stats';
-import type { DAUClassification, DAUSummary, DAUBatchResponse } from '@/lib/dau/types';
+import type { DAUClassification, DAURecord, DAUSummary, DAUBatchResponse } from '@/lib/dau/types';
+import {
+    APPROX_USD_PER_RECORD_HIGH,
+    APPROX_USD_PER_RECORD_LOW,
+    buildFrame,
+    DEFAULT_SAMPLE_SIZE,
+    drawSample,
+    MIN_HIGH_SEVERITY,
+    SAMPLING_SEED,
+    suggestSampleSize,
+    summarizeRecords,
+    type Frame,
+} from '@/lib/dau/sampling';
 
 /**
  * Tamaño de cada tanda enviada al servidor: cada registro implica una
  * llamada al modelo y la función serverless tiene un tiempo límite.
  */
 const BATCH_SIZE = 2;
+/** Tandas en vuelo a la vez. Cada tanda son 2 llamadas al modelo en paralelo. */
+const CONCURRENCY = 4;
+const MAX_ATTEMPTS = 4;
 
 function chunk<T>(arr: T[], size: number): T[][] {
     const out: T[][] = [];
@@ -52,6 +67,13 @@ function download(name: string, content: string, type: string) {
 
 type ReviewDecision = 'ok' | 'excluir';
 
+/** Agrupa advertencias y errores por motivo (sin el número de fila) y los ordena por frecuencia. */
+function groupReasons(items: DAUParseError[]): [string, number][] {
+    const m = new Map<string, number>();
+    for (const e of items) m.set(e.reason, (m.get(e.reason) ?? 0) + 1);
+    return Array.from(m.entries()).sort((a, b) => b[1] - a[1]);
+}
+
 /**
  * Análisis retrospectivo de DAU según el protocolo aprobado por el CEC.
  *
@@ -67,6 +89,11 @@ type ReviewDecision = 'ok' | 'excluir';
  */
 export default function DAUAnalysisPage() {
     const [prepared, setPrepared] = useState<PreparedRecord[]>([]);
+    // Registros del archivo, el marco muestral y la muestra fijada.
+    const [allRecords, setAllRecords] = useState<DAURecord[]>([]);
+    const [excludePediatric, setExcludePediatric] = useState(true);
+    const [sampleSizeInput, setSampleSizeInput] = useState(String(DEFAULT_SAMPLE_SIZE));
+    const [sampleFixed, setSampleFixed] = useState<{ n: number; high: number; critical: number } | null>(null);
     const [parseErrors, setParseErrors] = useState<DAUParseError[]>([]);
     const [parseWarnings, setParseWarnings] = useState<DAUParseError[]>([]);
     const [reviewIdx, setReviewIdx] = useState<number[]>([]);
@@ -85,6 +112,12 @@ export default function DAUAnalysisPage() {
     const [savedRunId, setSavedRunId] = useState<string | null>(null);
     const [dragActive, setDragActive] = useState(false);
     const [startedAt, setStartedAt] = useState<string | null>(null);
+
+    const frame: Frame | null = useMemo(
+        () => (allRecords.length > 0 ? buildFrame(allRecords, { excludePediatric }) : null),
+        [allRecords, excludePediatric],
+    );
+    const frameSummary = useMemo(() => (frame ? summarizeRecords(frame.records) : null), [frame]);
 
     const excluded = useMemo(
         () => new Set(Object.entries(decisions).filter(([, d]) => d === 'excluir').map(([i]) => Number(i))),
@@ -115,12 +148,28 @@ export default function DAUAnalysisPage() {
         setDecisions({});
         setFileName(file.name);
         const parsed = parseDAUFile(await file.text());
-        const prep = prepareRecords(parsed.records);
-        setPrepared(prep);
-        setReviewIdx(reviewSampleIndices(prep.length));
+        // No se desidentifica todo el archivo: solo la muestra que se fije después.
+        setAllRecords(parsed.records);
+        setPrepared([]);
+        setReviewIdx([]);
+        setSampleFixed(null);
         setParseErrors(parsed.errors);
         setParseWarnings(parsed.warnings ?? []);
         if (parsed.records.length === 0) setError('No se encontraron registros válidos en el archivo.');
+    }
+
+    function fixSample() {
+        if (!frame) return;
+        const n = Math.max(1, Math.floor(Number(sampleSizeInput) || DEFAULT_SAMPLE_SIZE));
+        const sample = drawSample(frame.records, n, SAMPLING_SEED);
+        const sum = summarizeRecords(sample);
+        const prep = prepareRecords(sample);
+        resetRun();
+        setReviewApproved(false);
+        setDecisions({});
+        setPrepared(prep);
+        setReviewIdx(reviewSampleIndices(prep.length));
+        setSampleFixed({ n: sample.length, high: sum.high_severity, critical: sum.critical });
     }
 
     async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -135,60 +184,105 @@ export default function DAUAnalysisPage() {
         if (file) processFile(file);
     }
 
+    /** Envía una tanda con reintentos ante límite de tasa (429), errores del servidor o de red. */
+    async function postBatch(batch: PreparedRecord[]): Promise<DAUBatchResponse & { protocol?: ProtocolFingerprint }> {
+        let lastError = 'Error desconocido.';
+        for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+            if (attempt > 0) await new Promise((r) => setTimeout(r, 1500 * 2 ** (attempt - 1)));
+            let res: Response;
+            try {
+                res = await fetch('/api/dau', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ records: batch.map(toOutbound) }),
+                });
+            } catch (netErr) {
+                lastError = `Error de red: ${(netErr as Error).message}`;
+                continue;
+            }
+            const raw = await res.text();
+            let data: (DAUBatchResponse & { error?: string; protocol?: ProtocolFingerprint }) | null = null;
+            try {
+                data = JSON.parse(raw);
+            } catch {
+                lastError = res.ok ? 'El servidor devolvió una respuesta no válida.' : `Error del servidor (${res.status}).`;
+                if (res.status >= 500 || res.status === 429) continue;
+                throw new Error(lastError);
+            }
+            if (res.status === 401 || res.status === 403) throw new Error(data?.error ?? 'Sesión expirada o sin permiso. Inicie sesión de nuevo.');
+            if (res.status === 429 || res.status >= 500) {
+                lastError = data?.error ?? `Error del servidor (${res.status}).`;
+                continue;
+            }
+            if (!res.ok || !data) throw new Error(data?.error ?? `Error del servidor (${res.status}).`);
+            return data;
+        }
+        throw new Error(`${lastError} Se agotaron los reintentos.`);
+    }
+
     async function runAnalysis() {
         if (toSend.length === 0 || !reviewApproved) return;
         setLoading(true);
         setError(null);
         resetRun();
         setStartedAt(new Date().toISOString());
-        const accumulated: DAUClassification[] = [];
+        const batches = chunk(toSend, BATCH_SIZE);
+        const slots: (DAUClassification[] | undefined)[] = new Array(batches.length);
         let runProtocol: ProtocolFingerprint | null = null;
+        let next = 0;
+        let failed: string | null = null;
+        let doneCount = 0;
         setProgress({ done: 0, total: toSend.length });
 
-        try {
-            for (const batch of chunk(toSend, BATCH_SIZE)) {
-                const res = await fetch('/api/dau', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ records: batch.map(toOutbound) }),
-                });
-                const raw = await res.text();
-                let data: (DAUBatchResponse & { error?: string; protocol?: ProtocolFingerprint }) | null = null;
+        const collect = () => slots.flat().filter((x): x is DAUClassification => !!x);
+
+        async function worker() {
+            while (failed == null) {
+                const idx = next++;
+                if (idx >= batches.length) return;
+                const batch = batches[idx];
                 try {
-                    data = JSON.parse(raw);
-                } catch {
-                    throw new Error(
-                        res.ok
-                            ? 'El servidor devolvió una respuesta no válida.'
-                            : `Error del servidor (${res.status}). La tanda pudo exceder el tiempo límite.`,
-                    );
-                }
-                if (!res.ok || !data) throw new Error(data?.error ?? `Error del servidor (${res.status}).`);
-
-                // Huella del protocolo: debe ser idéntica en todas las tandas.
-                if (data.protocol) {
-                    if (runProtocol && JSON.stringify(runProtocol) !== JSON.stringify(data.protocol)) {
-                        throw new Error('Cambió la versión del protocolo durante la corrida. Se detiene el análisis.');
+                    const data = await postBatch(batch);
+                    // Huella del protocolo: debe ser idéntica en todas las tandas.
+                    if (data.protocol) {
+                        if (runProtocol && JSON.stringify(runProtocol) !== JSON.stringify(data.protocol)) {
+                            throw new Error('Cambió la versión del protocolo durante la corrida. Se detiene el análisis.');
+                        }
+                        runProtocol = data.protocol;
+                        setProtocol(data.protocol);
                     }
-                    runProtocol = data.protocol;
-                    setProtocol(data.protocol);
+                    const byId = new Map(batch.map((p) => [p.record.record_id, p]));
+                    slots[idx] = data.results.map((r) => {
+                        const p = byId.get(r.record_id);
+                        return p ? mergeReference(r, p) : r;
+                    });
+                    doneCount += batch.length;
+                    // Resumen parcial cada tanda; el cálculo completo se hace al final.
+                    if (idx % 10 === 0 || doneCount === toSend.length) {
+                        const partial = collect();
+                        setResults(partial);
+                        setSummary(summarizeDAU(partial));
+                    }
+                    setProgress({ done: doneCount, total: toSend.length });
+                } catch (err) {
+                    failed = (err as Error).message;
                 }
-
-                const byId = new Map(batch.map((p) => [p.record.record_id, p]));
-                for (const r of data.results) {
-                    const p = byId.get(r.record_id);
-                    accumulated.push(p ? mergeReference(r, p) : r);
-                }
-                setResults([...accumulated]);
-                setSummary(summarizeDAU(accumulated));
-                setProgress({ done: accumulated.length, total: toSend.length });
             }
-        } catch (err) {
-            setError((err as Error).message);
-        } finally {
-            setLoading(false);
         }
 
+        await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
+        const accumulated = collect();
+        setResults(accumulated);
+        setSummary(accumulated.length > 0 ? summarizeDAU(accumulated) : null);
+        setLoading(false);
+
+        if (failed) {
+            // Corrida interrumpida: se conservan los resultados parciales para exportarlos,
+            // pero no se guardan en la base de datos como corrida completa.
+            setError(`${failed} Procesados ${accumulated.length} de ${toSend.length}. Los resultados parciales se pueden exportar.`);
+            if (accumulated.length > 0) setStudy(computeStudyMetrics(accumulated));
+            return;
+        }
         if (accumulated.length > 0) {
             const finalStudy = computeStudyMetrics(accumulated);
             setStudy(finalStudy);
@@ -261,7 +355,26 @@ export default function DAUAnalysisPage() {
         if (!study) return;
         download(
             'dau_metricas.json',
-            JSON.stringify({ file_name: fileName, started_at: startedAt, protocol, study }, null, 2),
+            JSON.stringify(
+                {
+                    file_name: fileName,
+                    started_at: startedAt,
+                    protocol,
+                    sampling: frame && sampleFixed
+                        ? {
+                              seed: SAMPLING_SEED,
+                              file_records: frame.total_file,
+                              eligible_records: frame.records.length,
+                              sample_size: sampleFixed.n,
+                              exclude_pediatric: excludePediatric,
+                              exclusions: frame.excluded,
+                          }
+                        : null,
+                    study,
+                },
+                null,
+                2,
+            ),
             'application/json',
         );
     }
@@ -287,6 +400,9 @@ export default function DAUAnalysisPage() {
         );
         const reviewSummary = JSON.stringify({
             tipo: 'resumen_revision',
+            semilla_muestreo: SAMPLING_SEED,
+            registros_archivo: frame?.total_file ?? null,
+            registros_elegibles: frame?.records.length ?? null,
             lote_inicial: Math.min(INITIAL_REVIEW_LOT, prepared.length),
             muestra_total: reviewIdx.length,
             excluidos: excluded.size,
@@ -329,24 +445,38 @@ export default function DAUAnalysisPage() {
                     </label>
                     {fileName && (
                         <p className="mt-2 text-sm text-gray-600">
-                            <strong>{prepared.length}</strong> registro(s) válido(s) en <em>{fileName}</em>
-                            {parseErrors.length > 0 && <span className="text-amber-700"> · {parseErrors.length} fila(s) descartada(s)</span>}
-                            {parseWarnings.length > 0 && <span className="text-amber-700"> · {parseWarnings.length} advertencia(s)</span>}
+                            <strong>{allRecords.length.toLocaleString('es-CL')}</strong> registro(s) válido(s) en <em>{fileName}</em>
+                            {parseErrors.length > 0 && <span className="text-amber-700"> · {parseErrors.length.toLocaleString('es-CL')} fila(s) descartada(s)</span>}
+                            {parseWarnings.length > 0 && <span className="text-amber-700"> · {parseWarnings.length.toLocaleString('es-CL')} advertencia(s)</span>}
                         </p>
                     )}
                     {(parseErrors.length > 0 || parseWarnings.length > 0) && (
                         <details className="mt-2 text-xs text-amber-700">
-                            <summary className="cursor-pointer">Ver detalle</summary>
+                            <summary className="cursor-pointer">Ver detalle agrupado</summary>
                             <ul className="mt-1 list-disc pl-5">
-                                {[...parseErrors, ...parseWarnings].slice(0, 50).map((e, i) => (
-                                    <li key={i}>fila {e.row}: {e.reason}</li>
+                                {groupReasons([...parseErrors, ...parseWarnings]).slice(0, 15).map(([reason, count]) => (
+                                    <li key={reason}>{count.toLocaleString('es-CL')} × {reason}</li>
                                 ))}
                             </ul>
                         </details>
                     )}
                 </section>
 
-                {/* 2. Revisión de desidentificación */}
+                {/* 2. Muestra del estudio */}
+                {frame && frameSummary && (
+                    <SamplingSection
+                        frame={frame}
+                        frameSummary={frameSummary}
+                        excludePediatric={excludePediatric}
+                        setExcludePediatric={(v) => { setExcludePediatric(v); setSampleFixed(null); setPrepared([]); setReviewIdx([]); resetRun(); }}
+                        sampleSizeInput={sampleSizeInput}
+                        setSampleSizeInput={setSampleSizeInput}
+                        fixed={sampleFixed}
+                        onFix={fixSample}
+                    />
+                )}
+
+                {/* 3. Revisión de desidentificación */}
                 {prepared.length > 0 && (
                     <ReviewSection
                         prepared={prepared}
@@ -362,7 +492,7 @@ export default function DAUAnalysisPage() {
                 {/* 3. Clasificación */}
                 {prepared.length > 0 && (
                     <section className="rounded-lg border border-gray-200 bg-white p-4">
-                        <h2 className="text-sm font-semibold text-gray-800">3. Clasificar y calcular métricas</h2>
+                        <h2 className="text-sm font-semibold text-gray-800">4. Clasificar y calcular métricas</h2>
                         <p className="mt-1 text-xs text-gray-500">
                             Se enviarán {toSend.length} registro(s){excluded.size > 0 ? `, ${excluded.size} excluido(s) en la revisión` : ''}.
                         </p>
@@ -428,6 +558,99 @@ export default function DAUAnalysisPage() {
     );
 }
 
+const fmt = (n: number) => n.toLocaleString('es-CL');
+
+function SamplingSection(props: {
+    frame: Frame;
+    frameSummary: ReturnType<typeof summarizeRecords>;
+    excludePediatric: boolean;
+    setExcludePediatric: (v: boolean) => void;
+    sampleSizeInput: string;
+    setSampleSizeInput: (v: string) => void;
+    fixed: { n: number; high: number; critical: number } | null;
+    onFix: () => void;
+}) {
+    const { frame, frameSummary, excludePediatric, setExcludePediatric, sampleSizeInput, setSampleSizeInput, fixed, onFix } = props;
+    const eligible = frame.records.length;
+    const prevalence = eligible > 0 ? frameSummary.high_severity / eligible : 0;
+    const suggested = suggestSampleSize(prevalence);
+    const n = Math.max(1, Math.floor(Number(sampleSizeInput) || 0));
+    const nEff = Math.min(n, eligible);
+    const costLow = nEff * APPROX_USD_PER_RECORD_LOW;
+    const costHigh = nEff * APPROX_USD_PER_RECORD_HIGH;
+    const tooBig = n > 3000;
+    const ex = frame.excluded;
+
+    return (
+        <section className="rounded-lg border border-gray-200 bg-white p-4">
+            <h2 className="text-sm font-semibold text-gray-800">2. Muestra del estudio</h2>
+            <p className="mt-1 text-xs text-gray-600">
+                El protocolo aprobado fija un tamaño de trabajo de unos 1.000 registros, con muestreo aleatorio y un mínimo de {MIN_HIGH_SEVERITY} casos con
+                desenlace de alta gravedad. No se procesa el archivo completo: se clasifica solo la muestra.
+            </p>
+            <div className="mt-3 grid gap-2 text-xs text-gray-700 md:grid-cols-2">
+                <div className="rounded border border-gray-200 p-3">
+                    <div><strong>{fmt(frame.total_file)}</strong> registros en el archivo</div>
+                    <div><strong>{fmt(eligible)}</strong> elegibles (con motivo, categoría TENS y desenlace)</div>
+                    <ul className="mt-1 list-disc pl-5 text-gray-500">
+                        <li>{fmt(ex.sin_desenlace)} sin desenlace</li>
+                        <li>{fmt(ex.sin_tens)} sin categoría TENS</li>
+                        <li>{fmt(ex.menores)} menores de 18 años</li>
+                        <li>{fmt(ex.registro_de_prueba)} registros de prueba</li>
+                    </ul>
+                    <label className="mt-2 flex items-center gap-2">
+                        <input type="checkbox" checked={excludePediatric} onChange={(e) => setExcludePediatric(e.target.checked)} />
+                        Excluir menores de 18 años
+                    </label>
+                </div>
+                <div className="rounded border border-gray-200 p-3">
+                    <div>Alta gravedad entre los elegibles: <strong>{fmt(frameSummary.high_severity)}</strong> ({(prevalence * 100).toFixed(1)} %)</div>
+                    <div>Críticos (UPC o fallecimiento): <strong>{fmt(frameSummary.critical)}</strong></div>
+                    <div className="mt-1 text-gray-500">
+                        {Object.entries(frameSummary.by_outcome).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${fmt(v)}`).join(' · ')}
+                    </div>
+                    {suggested != null && (
+                        <div className="mt-2">
+                            Para esperar al menos {MIN_HIGH_SEVERITY} casos graves con esa prevalencia, la muestra debería ser de unos <strong>{fmt(suggested)}</strong> registros.
+                        </div>
+                    )}
+                </div>
+            </div>
+            <div className="mt-3 flex flex-wrap items-end gap-3 text-xs">
+                <label className="flex flex-col gap-1">
+                    <span className="font-medium text-gray-700">Tamaño de la muestra</span>
+                    <input
+                        type="number"
+                        min={1}
+                        value={sampleSizeInput}
+                        onChange={(e) => setSampleSizeInput(e.target.value)}
+                        className="w-32 rounded border border-gray-300 px-2 py-1.5 text-sm"
+                    />
+                </label>
+                <button
+                    onClick={onFix}
+                    disabled={eligible === 0 || tooBig}
+                    className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+                >
+                    Fijar muestra de {fmt(nEff)}
+                </button>
+                <span className="text-gray-600">
+                    Costo aproximado con Claude Sonnet 5: <strong>US$ {costLow.toFixed(0)} a {costHigh.toFixed(0)}</strong>. Semilla fija {SAMPLING_SEED}: la misma muestra se puede reproducir y ampliar.
+                </span>
+            </div>
+            {tooBig && <p className="mt-2 text-xs text-red-700">Una muestra de más de 3.000 registros excede lo aprobado por el CEC y su costo. Reduzca el tamaño.</p>}
+            {fixed && (
+                <p className={`mt-3 rounded p-2 text-xs ${fixed.high >= MIN_HIGH_SEVERITY ? 'bg-green-50 text-green-800' : 'bg-amber-50 text-amber-800'}`}>
+                    Muestra fijada: {fmt(fixed.n)} registros, con <strong>{fixed.high}</strong> de alta gravedad ({fixed.critical} críticos).{' '}
+                    {fixed.high >= MIN_HIGH_SEVERITY
+                        ? 'Alcanza el mínimo del protocolo.'
+                        : `No alcanza el mínimo de ${MIN_HIGH_SEVERITY}: amplíe la muestra. La ampliación contiene a la actual.`}
+                </p>
+            )}
+        </section>
+    );
+}
+
 function ReviewSection(props: {
     prepared: PreparedRecord[];
     reviewIdx: number[];
@@ -462,7 +685,7 @@ function ReviewSection(props: {
 
     return (
         <section className="rounded-lg border border-gray-200 bg-white p-4">
-            <h2 className="text-sm font-semibold text-gray-800">2. Revisión manual de la desidentificación</h2>
+            <h2 className="text-sm font-semibold text-gray-800">3. Revisión manual de la desidentificación</h2>
             <p className="mt-1 text-xs text-gray-600">
                 Protocolo CEC: revisión del 100% del lote inicial ({Math.min(INITIAL_REVIEW_LOT, prepared.length)} textos) y de una muestra
                 aleatoria del 10% del resto ({Math.max(0, reviewIdx.length - Math.min(INITIAL_REVIEW_LOT, prepared.length))} textos). Criterio de
