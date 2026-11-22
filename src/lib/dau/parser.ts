@@ -192,10 +192,10 @@ export function coerceOutcome(value: unknown): DAUOutcome | null {
         .toLowerCase()
         .normalize('NFD')
         .replace(/[\u0300-\u036f]/g, '');
-    if (v === '') return null;
+    if (v === '' || v === '(null)' || v === 'null') return null;
     if (/fallec|defunc|muert|obito/.test(v)) return 'fallecimiento';
     if (/\b(upc|uci|uti)\b|intensiv|paciente critico|cuidados intermedios/.test(v)) return 'upc';
-    if (/trasl|mayor complejidad|otro (centro|hospital)/.test(v)) return 'traslado';
+    if (/trasl|mayor complejidad|otro (centro|hospital)|derivaci.*(hospital|servicio de salud|clinica|centro)/.test(v)) return 'traslado';
     if (/hospitaliz|ingreso a (sala|servicio|piso)|\bsala\b|pabellon|cirugia de urgencia/.test(v)) return 'hospitalizacion';
     if (/fuga|abandon|voluntari|rechaz|se retira/.test(v)) return 'otro';
     if (/\balta\b|domicilio|\bcasa\b|ambulator|cesfam|\baps\b|policlin|control/.test(v)) return 'alta';
@@ -325,7 +325,8 @@ function buildRecord(
     if (!ageGroup && ageYears != null) {
         ageGroup = ageGroupFromYears(ageYears);
     }
-    const outcomeRaw = coerceText(obj.outcome);
+    let outcomeRaw = coerceText(obj.outcome);
+    if (outcomeRaw && /^\(?null\)?$/i.test(outcomeRaw)) outcomeRaw = null;
 
     const record: DAURecord = {
         record_id: recordId,
@@ -449,16 +450,44 @@ function splitCsvLine(line: string, delimiter: string = ','): string[] {
  * error. Las columnas no reconocidas (incl. signos vitales instrumentados) se
  * ignoran silenciosamente.
  */
+/**
+ * Divide el texto en registros respetando las comillas: un salto de línea dentro
+ * de un campo entre comillas NO termina el registro. Sin esto, un motivo de
+ * consulta con salto de línea desalinea las columnas de ese registro.
+ */
+export function splitCsvRecords(text: string): string[] {
+    const out: string[] = [];
+    let cur = '';
+    let inQuotes = false;
+    for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+        if (ch === '"') {
+            // Comilla escapada "" dentro de un campo entre comillas.
+            if (inQuotes && text[i + 1] === '"') {
+                cur += '""';
+                i++;
+                continue;
+            }
+            inQuotes = !inQuotes;
+            cur += ch;
+        } else if ((ch === '\n' || ch === '\r') && !inQuotes) {
+            if (ch === '\r' && text[i + 1] === '\n') i++;
+            if (cur.trim().length > 0) out.push(cur);
+            cur = '';
+        } else {
+            cur += ch;
+        }
+    }
+    if (cur.trim().length > 0) out.push(cur);
+    return out;
+}
+
 export function parseDAUCsv(text: string): DAUParseResult {
     const records: DAURecord[] = [];
     const errors: DAUParseError[] = [];
     const warnings: DAUParseError[] = [];
 
-    const lines = text
-        .replace(/\r\n/g, '\n')
-        .replace(/\r/g, '\n')
-        .split('\n')
-        .filter((l) => l.trim().length > 0);
+    const lines = splitCsvRecords(text);
 
     if (lines.length === 0) {
         errors.push({ row: 0, reason: 'CSV vacío' });
@@ -480,6 +509,14 @@ export function parseDAUCsv(text: string): DAUParseResult {
     for (let i = 1; i < lines.length; i++) {
         const row = i; // 1-based sin contar cabecera
         const cells = splitCsvLine(lines[i], delimiter);
+        // Un registro con otra cantidad de columnas está desalineado: sus campos
+        // (sexo, edad, categoría TENS, destino) no se pueden atribuir con certeza.
+        // Se descarta en vez de arriesgar datos cruzados. Se tolera una celda final vacía.
+        const extraEmpty = cells.length === headerCells.length + 1 && cells[cells.length - 1].trim() === '';
+        if (cells.length !== headerCells.length && !extraEmpty) {
+            errors.push({ row, reason: `columnas desalineadas (${cells.length} en vez de ${headerCells.length})` });
+            continue;
+        }
         const mapped: Partial<Record<CanonicalField, unknown>> = {};
         columnMap.forEach((canonical, idx) => {
             if (canonical) mapped[canonical] = cells[idx];
