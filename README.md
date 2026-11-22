@@ -123,7 +123,7 @@ Ruta `/resultados/dau` (rol `researcher` o `admin`). Implementa el protocolo de 
    - Estratos por motivo, sexo y edad.
 6. **Exportes**: resultados CSV, métricas JSON y bitácora JSONL con el texto exacto enviado. La bitácora se guarda solo en el equipo con cifrado de disco.
 
-Cada corrida registra la huella del protocolo congelado: modelo, SHA-256 del prompt, versión de reglas, versión del detector y esfuerzo. El guardado rechaza mezclar versiones. Claude Sonnet 5 rechaza `temperature`, así que la consistencia se fija con el esfuerzo `high`.
+Cada corrida registra la huella del protocolo congelado: modelo, SHA-256 del prompt, versión de reglas, versión del detector y esfuerzo. El guardado rechaza mezclar versiones. Claude Sonnet 5 rechaza `temperature`, así que la consistencia se fija con el esfuerzo `medium`.
 
 ## 🏥 Protocolo ESI
 

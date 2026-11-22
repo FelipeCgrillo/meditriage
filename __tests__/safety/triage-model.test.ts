@@ -59,7 +59,7 @@ describe('callTriageModel (SDK oficial)', () => {
         expect(p).not.toHaveProperty('temperature');
         expect(p).not.toHaveProperty('top_p');
         const oc = p.output_config as { effort: string; format?: unknown };
-        expect(oc.effort).toBe('high');
+        expect(oc.effort).toBe('medium');
         // Sin gramática: la API rechazó el esquema del CMD por complejidad. Se valida con Zod.
         expect(oc.format).toBeUndefined();
     });
