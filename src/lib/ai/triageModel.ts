@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { extractJSON } from '@/lib/utils/validation';
+import { sanitizeModelOutput } from '@/lib/ai/sanitizeModelOutput';
 import {
     ANTHROPIC_EFFORT,
     ANTHROPIC_MAX_TOKENS,
@@ -81,7 +82,10 @@ export async function callTriageModel(input: {
             return { ok: false, reason: 'no_json', model };
         }
 
-        const parsed = TriageModelOutputSchema.safeParse(candidate);
+        // Normaliza variantes equivalentes (p. ej. "adulto" → "Adult") antes de validar.
+        const { value, repairs } = sanitizeModelOutput(candidate);
+        if (repairs.length > 0) console.warn('[triageModel] campos normalizados', { model, repairs: repairs.slice(0, 12) });
+        const parsed = TriageModelOutputSchema.safeParse(value);
         if (!parsed.success) {
             console.error('[triageModel] safeParse falló', {
                 model,

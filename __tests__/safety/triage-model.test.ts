@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { callTriageModel, setTriageClientFactoryForTests } from '@/lib/ai/triageModel';
 import { classifyFromText } from '@/lib/triage/classify';
+import { sanitizeModelOutput } from '@/lib/ai/sanitizeModelOutput';
 import { DEFAULT_ANTHROPIC_MODEL } from '@/lib/ai/config';
 
 type Captured = Record<string, unknown>;
@@ -94,5 +95,59 @@ describe('callTriageModel (SDK oficial)', () => {
         expect(r.llm_esi_level).toBe(4);
         expect(r.esi_level).toBe(2);
         expect(r.decision_source).toBe('rule_engine_override');
+    });
+});
+
+describe('normalización de la salida del modelo (sin gramática)', () => {
+    it('corrige variantes equivalentes y no pierde señales de alarma', async () => {
+        process.env.ANTHROPIC_API_KEY = 'test';
+        mockClient({
+            status: 'success',
+            esi_level: '2',
+            reasoning: 'dolor torácico opresivo con disnea',
+            suggested_action: 'null',
+            extracted_features: {
+                symptoms_description: 'dolor de pecho opresivo',
+                symptom_onset: 'menos de 1 hora',
+                age_group: 'adulto',
+                pain_severity: '8/10',
+                respiratory_difficulty_reported: 'severa',
+                fever_reported: 'sin fiebre',
+                consciousness_reported: 'Normal',
+                suicidal_ideation: 'no',
+                comorbidities: 'hipertensión',
+            },
+        });
+        const r = await callTriageModel({ system: 's', messages: [{ role: 'user', content: 'x' }] });
+        expect(r.ok).toBe(true);
+        if (!r.ok) return;
+        expect(r.data.esi_level).toBe(2);
+        expect(r.data.extracted_features).toMatchObject({
+            symptom_onset: 'menos_1_hora',
+            age_group: 'Adult',
+            pain_severity: 8,
+            respiratory_difficulty_reported: 'anormal',
+            fever_reported: 'normal',
+            consciousness_reported: 'normal',
+            suicidal_ideation: false,
+            comorbidities: ['hipertensión'],
+        });
+    });
+
+    it('descarta solo el campo ininterpretable y conserva el resto', () => {
+        const { value, repairs } = sanitizeModelOutput({
+            status: 'success',
+            esi_level: 3,
+            extracted_features: { pain_severity: 'mucho', symptoms_description: 'tos', age_group: 'joven' },
+        });
+        expect(value).toMatchObject({ extracted_features: { symptoms_description: 'tos' } });
+        expect((value as { extracted_features: Record<string, unknown> }).extracted_features).not.toHaveProperty('pain_severity');
+        expect(repairs).toEqual(expect.arrayContaining(['-extracted_features.pain_severity', '-extracted_features.age_group']));
+    });
+
+    it('no puede inyectar campos del servidor', () => {
+        const { value } = sanitizeModelOutput({ status: 'success', esi_level: 5, matched_rule: 'P9.9', decision_source: 'llm', disposition: 'emergency' });
+        expect(value).not.toHaveProperty('matched_rule');
+        expect(value).not.toHaveProperty('disposition');
     });
 });
