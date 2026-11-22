@@ -439,10 +439,26 @@ function ReviewSection(props: {
 }) {
     const { prepared, reviewIdx, decisions, setDecisions, approved, onApprove, pending } = props;
     const [page, setPage] = useState(0);
-    const perPage = 20;
+    const perPage = 25;
     const pageItems = reviewIdx.slice(page * perPage, (page + 1) * perPage);
     const pages = Math.ceil(reviewIdx.length / perPage);
     const set = (i: number, d: ReviewDecision) => setDecisions((prev) => ({ ...prev, [i]: d }));
+
+    // Un texto necesita decisión individual si la desidentificación sustituyó algo
+    // o si hay posibles nombres. El resto se puede aprobar por página tras leerlo.
+    const needsIndividual = (i: number) => {
+        const p = prepared[i];
+        const hits = Object.keys(p.complaint.hits).length + Object.keys(p.symptoms?.hits ?? {}).length;
+        return hits > 0 || p.complaint.review_flags.length > 0 || (p.symptoms?.review_flags.length ?? 0) > 0;
+    };
+    const bulkable = pageItems.filter((i) => decisions[i] == null && !needsIndividual(i));
+    const withAlerts = reviewIdx.filter(needsIndividual).length;
+    const approvePage = () =>
+        setDecisions((prev) => {
+            const next = { ...prev };
+            for (const i of bulkable) next[i] = 'ok';
+            return next;
+        });
 
     return (
         <section className="rounded-lg border border-gray-200 bg-white p-4">
@@ -455,6 +471,18 @@ function ReviewSection(props: {
             <p className="mt-1 text-xs text-gray-500">
                 Pendientes: <strong>{pending}</strong> de {reviewIdx.length}. El texto original se muestra solo en este navegador.
             </p>
+            <div className="mt-3 flex flex-wrap items-center gap-3 rounded border border-gray-200 bg-gray-50 p-2 text-xs text-gray-700">
+                <button
+                    onClick={approvePage}
+                    disabled={approved || bulkable.length === 0}
+                    className="rounded bg-green-600 px-3 py-1.5 font-semibold text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+                >
+                    Marcar sin identificadores los {bulkable.length} pendientes de esta página
+                </button>
+                <span>
+                    Léalos antes de aprobar. Los textos con sustituciones o posibles nombres ({withAlerts} en total) exigen decisión individual.
+                </span>
+            </div>
             <div className="mt-3 space-y-3">
                 {pageItems.map((i) => {
                     const p = prepared[i];
