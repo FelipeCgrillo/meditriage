@@ -19,7 +19,7 @@
  * profundidad (es idempotente sobre su propia salida).
  */
 
-export const DEID_VERSION = '2026.11-v1';
+export const DEID_VERSION = '2026.11-v2';
 
 export type DeidCategory =
     | 'rut'
@@ -101,7 +101,7 @@ const UNITS = [
 ];
 const FACILITIES = [
     'hospital militar', 'hospital', 'hosp.', 'clínica', 'clinica', 'cesfam', 'cecosf', 'sapu', 'sar', 'consultorio',
-    'posta', 'centro médico', 'centro medico', 'mutual', 'achs', 'hms', 'hosmil',
+    'posta', 'centro médico', 'centro medico', 'mutual', 'achs', 'ist', 'hms', 'hosmil',
 ];
 const RELATIONS = ['paciente', 'pcte.', 'hijo', 'hija', 'esposo', 'esposa', 'madre', 'padre', 'hermano', 'hermana', 'familiar'];
 /** Nombre en formato título (Juan), no en mayúsculas sostenidas. */
@@ -342,6 +342,8 @@ export function deidentifyText(input: string | null | undefined): DeidResult {
 /** Clave de estratificación por motivo de consulta (texto ya desidentificado). */
 export function complaintKey(deidentifiedComplaint: string): string {
     return deidentifiedComplaint
+        // "ref/", "Ref.", "REF" o "refiere": abreviatura del TENS, sin contenido clínico.
+        .replace(/^\s*(?:refiere|ref)\b[\s/.:]*/i, '')
         .toLowerCase()
         .normalize('NFD')
         .replace(/[̀-ͯ]/g, '')

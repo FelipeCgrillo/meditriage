@@ -34,7 +34,10 @@ export interface DAUParseError {
  * DAURecord. Las claves se normalizan (minúsculas, sin acentos, sin espacios
  * ni guiones) antes de buscar aquí.
  */
-const HEADER_ALIASES: Record<string, keyof DAURecord> = {
+/** Campo canónico de entrada: los de DAURecord más la hora de ingreso (solo para derivar la franja). */
+type CanonicalField = keyof DAURecord | 'admission_time';
+
+const HEADER_ALIASES: Record<string, CanonicalField> = {
     // record_id
     record_id: 'record_id',
     recordid: 'record_id',
@@ -70,6 +73,14 @@ const HEADER_ALIASES: Record<string, keyof DAURecord> = {
     fecha: 'admission_datetime',
     fecha_hora: 'admission_datetime',
     ingreso: 'admission_datetime',
+    // hora de ingreso (se reduce a franja horaria y se descarta)
+    admission_time: 'admission_time',
+    hora_ingreso: 'admission_time',
+    horaingreso: 'admission_time',
+    horingresoadm: 'admission_time',
+    hora_ingreso_adm: 'admission_time',
+    horaingresoadm: 'admission_time',
+    hora: 'admission_time',
     // chief_complaint
     chief_complaint: 'chief_complaint',
     chiefcomplaint: 'chief_complaint',
@@ -78,6 +89,9 @@ const HEADER_ALIASES: Record<string, keyof DAURecord> = {
     motivo: 'chief_complaint',
     motivo_de_consulta: 'chief_complaint',
     queja_principal: 'chief_complaint',
+    motivoconsultaadm: 'chief_complaint',
+    motivo_consulta_adm: 'chief_complaint',
+    motivo_admision: 'chief_complaint',
     // reported_symptoms
     reported_symptoms: 'reported_symptoms',
     reportedsymptoms: 'reported_symptoms',
@@ -221,14 +235,53 @@ export function ageGroupFromYears(age: number): DAUAgeGroup {
     return 'Adult';
 }
 
-/** Coerciona un valor a ESILevel (1..5) o null. Acepta "C3", "3", etc. */
+/** Coerciona un valor a ESILevel (1..5) o null. Acepta "C3", "3", "C3 - Urgencia", "ESI 2". */
 function coerceEsi(value: unknown): ESILevel | null {
     if (value == null) return null;
-    const s = String(value).trim().toLowerCase().replace(/^c/, '');
-    if (s === '') return null;
-    const n = Number(s);
-    if (!Number.isInteger(n) || n < 1 || n > 5) return null;
-    return n as ESILevel;
+    const s = String(value).trim().toLowerCase();
+    const m = s.match(/^(?:c|esi|nivel)?\s*([1-5])(?![0-9])/);
+    if (!m) return null;
+    return Number(m[1]) as ESILevel;
+}
+
+/**
+ * Reduce una fecha de ingreso a mes y año (AAAA-MM). Acepta dd-mm-aa,
+ * dd-mm-aaaa, dd/mm/aaaa y aaaa-mm-dd, con o sin hora. La fecha exacta se
+ * descarta (minimización comprometida con el CEC).
+ */
+export function periodFromDate(value: unknown): string | null {
+    if (value == null) return null;
+    const v = String(value).trim();
+    let m = v.match(/^(\d{4})-(\d{1,2})-\d{1,2}/);
+    if (m) return `${m[1]}-${m[2].padStart(2, '0')}`;
+    m = v.match(/^\d{1,2}[-/.](\d{1,2})[-/.](\d{2}|\d{4})\b/);
+    if (m) {
+        const year = m[2].length === 2 ? `20${m[2]}` : m[2];
+        const month = Number(m[1]);
+        if (month < 1 || month > 12) return null;
+        return `${year}-${String(month).padStart(2, '0')}`;
+    }
+    return null;
+}
+
+/** Franjas horarias de 6 horas usadas en el estudio. */
+export function timeBandFromTime(value: unknown): string | null {
+    if (value == null) return null;
+    const m = String(value).match(/(?:^|\s|T)(\d{1,2}):\d{2}/);
+    if (!m) return null;
+    const h = Number(m[1]);
+    if (h < 0 || h > 23) return null;
+    if (h < 6) return '00-06';
+    if (h < 12) return '06-12';
+    if (h < 18) return '12-18';
+    return '18-24';
+}
+
+/** Tramo quinquenal a partir de la edad en años (80 y más, abierto). */
+export function ageBandFromYears(age: number): string {
+    if (age >= 80) return '80+';
+    const lower = Math.floor(age / 5) * 5;
+    return `${lower}-${lower + 4}`;
 }
 
 /** Coerciona la edad a número positivo o null. */
@@ -252,7 +305,7 @@ function coerceText(value: unknown): string | null {
  * Si falta age_group pero hay age_years, lo deriva.
  */
 function buildRecord(
-    obj: Partial<Record<keyof DAURecord, unknown>>,
+    obj: Partial<Record<CanonicalField, unknown>>,
     fallbackId: string,
 ): { record: DAURecord } | { error: string } {
     const chiefComplaint = coerceText(obj.chief_complaint);
@@ -265,6 +318,7 @@ function buildRecord(
     let ageBandText = coerceText(obj.age_band);
     if (!ageBandText && parseAgeBand(obj.age_years)) ageBandText = coerceText(obj.age_years);
     const ageYears = coerceAge(obj.age_years);
+    if (!ageBandText && ageYears != null) ageBandText = ageBandFromYears(ageYears);
     const band = parseAgeBand(ageBandText);
     let ageGroup = coerceAgeGroup(obj.age_group as string | null | undefined);
     if (!ageGroup && band) ageGroup = ageGroupFromBand(band);
@@ -278,15 +332,19 @@ function buildRecord(
         age_years: ageYears,
         age_group: ageGroup,
         sex: coerceSex(obj.sex as string | null | undefined),
-        admission_datetime: coerceText(obj.admission_datetime),
+        // La fecha y hora exactas se reducen a mes y franja y NO se conservan.
+        admission_datetime: null,
         chief_complaint: chiefComplaint,
         reported_symptoms: coerceText(obj.reported_symptoms),
         tens_esi: coerceEsi(obj.tens_esi),
         outcome: coerceOutcome(outcomeRaw),
         outcome_raw: outcomeRaw,
         age_band: ageBandText,
-        period: coerceText(obj.period),
-        time_band: coerceText(obj.time_band),
+        period: coerceText(obj.period) ?? periodFromDate(obj.admission_datetime),
+        time_band:
+            coerceText(obj.time_band) ??
+            timeBandFromTime(obj.admission_time) ??
+            timeBandFromTime(obj.admission_datetime),
     };
     return { record };
 }
@@ -320,7 +378,7 @@ export function parseDAUJson(input: unknown): DAUParseResult {
             return;
         }
         // Remapear claves del objeto JSON vía alias.
-        const mapped: Partial<Record<keyof DAURecord, unknown>> = {};
+        const mapped: Partial<Record<CanonicalField, unknown>> = {};
         for (const [key, value] of Object.entries(item as Record<string, unknown>)) {
             const canonical = HEADER_ALIASES[normalizeHeader(key)];
             if (canonical) mapped[canonical] = value;
@@ -343,7 +401,19 @@ export function parseDAUJson(input: unknown): DAUParseResult {
  * Tokeniza una sola línea CSV respetando comillas dobles y comas internas.
  * Soporta comillas escapadas como "".
  */
-function splitCsvLine(line: string): string[] {
+/** Detecta el separador por la cabecera: tabulación, punto y coma o coma. */
+export function detectDelimiter(headerLine: string): '\t' | ';' | ',' {
+    const counts = {
+        '\t': (headerLine.match(/\t/g) ?? []).length,
+        ';': (headerLine.match(/;/g) ?? []).length,
+        ',': (headerLine.match(/,/g) ?? []).length,
+    };
+    if (counts['\t'] > 0 && counts['\t'] >= counts[';'] && counts['\t'] >= counts[',']) return '\t';
+    if (counts[';'] > 0 && counts[';'] >= counts[',']) return ';';
+    return ',';
+}
+
+function splitCsvLine(line: string, delimiter: string = ','): string[] {
     const out: string[] = [];
     let cur = '';
     let inQuotes = false;
@@ -362,7 +432,7 @@ function splitCsvLine(line: string): string[] {
             }
         } else if (ch === '"') {
             inQuotes = true;
-        } else if (ch === ',' || ch === ';') {
+        } else if (ch === delimiter) {
             out.push(cur);
             cur = '';
         } else {
@@ -395,8 +465,9 @@ export function parseDAUCsv(text: string): DAUParseResult {
         return { records, errors };
     }
 
-    const headerCells = splitCsvLine(lines[0]).map(normalizeHeader);
-    const columnMap: (keyof DAURecord | null)[] = headerCells.map((h) => HEADER_ALIASES[h] ?? null);
+    const delimiter = detectDelimiter(lines[0]);
+    const headerCells = splitCsvLine(lines[0], delimiter).map(normalizeHeader);
+    const columnMap: (CanonicalField | null)[] = headerCells.map((h) => HEADER_ALIASES[h] ?? null);
 
     if (!columnMap.includes('chief_complaint')) {
         errors.push({
@@ -408,8 +479,8 @@ export function parseDAUCsv(text: string): DAUParseResult {
 
     for (let i = 1; i < lines.length; i++) {
         const row = i; // 1-based sin contar cabecera
-        const cells = splitCsvLine(lines[i]);
-        const mapped: Partial<Record<keyof DAURecord, unknown>> = {};
+        const cells = splitCsvLine(lines[i], delimiter);
+        const mapped: Partial<Record<CanonicalField, unknown>> = {};
         columnMap.forEach((canonical, idx) => {
             if (canonical) mapped[canonical] = cells[idx];
         });

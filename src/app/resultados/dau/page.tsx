@@ -106,7 +106,7 @@ export default function DAUAnalysisPage() {
     async function processFile(file: File) {
         const name = file.name.toLowerCase();
         if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
-            setError('Guarde el Excel como "CSV UTF 8 (delimitado por comas)" y súbalo nuevamente.');
+            setError('Guarde el Excel como "Texto (delimitado por tabulaciones)" o "CSV UTF 8" y súbalo nuevamente.');
             return;
         }
         setError(null);
@@ -308,7 +308,7 @@ export default function DAUAnalysisPage() {
 
                 {/* 1. Carga */}
                 <section className="rounded-lg border border-gray-200 bg-white p-4">
-                    <h2 className="text-sm font-semibold text-gray-800">1. Cargar archivo del custodio (CSV o JSON)</h2>
+                    <h2 className="text-sm font-semibold text-gray-800">1. Cargar archivo del custodio (CSV, TSV o JSON)</h2>
                     <label
                         htmlFor="dau-file-input"
                         onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
@@ -324,7 +324,7 @@ export default function DAUAnalysisPage() {
                             Columnas reconocidas: id, sexo, tramo etario, mes, franja horaria, motivo de consulta,
                             síntomas, categoría TENS, destino al egreso
                         </span>
-                        <input id="dau-file-input" type="file" accept=".json,.csv,application/json,text/csv" onChange={handleFile} className="hidden" />
+                        <input id="dau-file-input" type="file" accept=".json,.csv,.tsv,.txt,application/json,text/csv,text/tab-separated-values,text/plain" onChange={handleFile} className="hidden" />
                     </label>
                     {fileName && (
                         <p className="mt-2 text-sm text-gray-600">

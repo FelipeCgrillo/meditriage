@@ -12,7 +12,7 @@ import {
     interpretationCell,
     isRelevantSubtriage,
 } from '@/lib/dau/metrics';
-import { deidentifyText } from '@/lib/dau/deidentify';
+import { complaintKey, deidentifyText } from '@/lib/dau/deidentify';
 import { coerceOutcome, parseAgeBand, parseDAUCsv } from '@/lib/dau/parser';
 import { mergeReference, prepareRecords, reviewSampleIndices, toOutbound } from '@/lib/dau/review';
 import { mentionsAffirmed } from '@/lib/triage/textMatch';
@@ -251,5 +251,42 @@ describe('reglas con negación', () => {
         const base = { consciousness_reported: 'normal', respiratory_difficulty_reported: 'normal', suicidal_ideation: false } as const;
         expect(evaluateRules({ ...base, symptoms_description: 'tos sin dolor de pecho' }).matchedRule).toBeNull();
         expect(evaluateRules({ ...base, symptoms_description: 'dolor de pecho intenso' }).matchedRule).toBe('P2.1');
+    });
+});
+
+// ── Formato de exportación del HMS (filas inventadas, mismo formato) ─────
+describe('exportación DAU del HMS (separada por tabulaciones)', () => {
+    const tsv = [
+        'Urgencia\tTipoUrgencia\tSexo\tFechaNac\tEdad\tFechaIngreso\tHorIngresoAdm\tMotivoConsultaAdm\tProcedencia\tCategorizacion\tFechaEgreso\tHoraEgreso\tDestino',
+        'Urgencia Adulto\tGeneral Adulto\tMujer\t01-01-80\t44\t15-03-24\t04:10:00\tref/ tos, fiebre, dolor de garganta\tEspontáneo\tC4 - Complejidad Baja\t15-03-24\t06:00:00\tDomicilio',
+        'Urgencia Adulto\tGeneral Adulto\tHombre\t01-01-40\t84\t15-03-24\t19:45:00\tAcc. Trabajo IST HMS. Caída de altura\tEspontáneo\tC2 - Emergencia\t16-03-24\t02:00:00\tHospitalización',
+    ].join('\n');
+
+    it('lee tabulaciones con comas dentro del motivo, la categoría "C4 - ..." y deriva variables disociadas', () => {
+        const r = parseDAUCsv(tsv);
+        expect(r.errors).toHaveLength(0);
+        expect(r.records).toHaveLength(2);
+        expect(r.records[0]).toMatchObject({
+            sex: 'F',
+            age_band: '40-44',
+            age_group: 'Adult',
+            period: '2024-03',
+            time_band: '00-06',
+            tens_esi: 4,
+            outcome: 'alta',
+            chief_complaint: 'ref/ tos, fiebre, dolor de garganta',
+        });
+        expect(r.records[1]).toMatchObject({ age_band: '80+', time_band: '18-24', tens_esi: 2, outcome: 'hospitalizacion' });
+    });
+
+    it('descarta fecha de nacimiento, fechas y horas exactas', () => {
+        const serialized = JSON.stringify(parseDAUCsv(tsv).records);
+        expect(serialized).not.toMatch(/01-01-80|15-03-24|16-03-24|04:10|19:45|06:00:00/);
+    });
+
+    it('sustituye el establecimiento y normaliza la clave del motivo', () => {
+        const [, p] = prepareRecords(parseDAUCsv(tsv).records);
+        expect(p.complaint.text).toBe('Acc. Trabajo [ESTABLECIMIENTO]. Caída de altura');
+        expect(complaintKey('ref/ Dolor abdominal')).toBe('dolor abdominal');
     });
 });
