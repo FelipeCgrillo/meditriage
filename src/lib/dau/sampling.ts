@@ -1,5 +1,6 @@
 import { isCritical, isHighSeverity } from '@/lib/dau/metrics';
 import { seededRandom } from '@/lib/stats';
+import { textInfoClass } from '@/lib/dau/textInfo';
 import type { DAURecord } from '@/lib/dau/types';
 
 /**
@@ -25,6 +26,8 @@ export const MIN_HIGH_SEVERITY = 73;
 
 export interface FrameOptions {
     excludePediatric: boolean;
+    /** Mínimo de palabras específicas del motivo (0 o ausente: sin filtro). */
+    minSpecificWords?: number;
 }
 
 export interface FrameExclusions {
@@ -32,10 +35,15 @@ export interface FrameExclusions {
     sin_desenlace: number;
     registro_de_prueba: number;
     menores: number;
+    /** Texto sin palabras específicas: no sirve ni para el estrato de texto pobre. */
+    texto_sin_contenido: number;
 }
 
 export interface Frame {
+    /** Marco principal: registros elegibles con texto informativo. */
     records: DAURecord[];
+    /** Estrato de texto pobre (1 a 2 palabras específicas), sorteado aparte. */
+    poor_records: DAURecord[];
     total_file: number;
     excluded: FrameExclusions;
 }
@@ -50,8 +58,10 @@ function isTestRecord(r: DAURecord): boolean {
 
 /** Aplica los criterios de elegibilidad y cuenta lo excluido por cada motivo. */
 export function buildFrame(records: DAURecord[], options: FrameOptions): Frame {
-    const excluded: FrameExclusions = { sin_tens: 0, sin_desenlace: 0, registro_de_prueba: 0, menores: 0 };
+    const excluded: FrameExclusions = { sin_tens: 0, sin_desenlace: 0, registro_de_prueba: 0, menores: 0, texto_sin_contenido: 0 };
     const out: DAURecord[] = [];
+    const poor: DAURecord[] = [];
+    const minWords = options.minSpecificWords ?? 0;
     for (const r of records) {
         if (isTestRecord(r)) {
             excluded.registro_de_prueba++;
@@ -69,9 +79,20 @@ export function buildFrame(records: DAURecord[], options: FrameOptions): Frame {
             excluded.sin_desenlace++;
             continue;
         }
+        if (minWords > 0) {
+            const cls = textInfoClass(`${r.chief_complaint} ${r.reported_symptoms ?? ''}`, minWords);
+            if (cls === 'sin_contenido') {
+                excluded.texto_sin_contenido++;
+                continue;
+            }
+            if (cls === 'pobre') {
+                poor.push(r);
+                continue;
+            }
+        }
         out.push(r);
     }
-    return { records: out, total_file: records.length, excluded };
+    return { records: out, poor_records: poor, total_file: records.length, excluded };
 }
 
 /**
@@ -89,6 +110,11 @@ export function drawSample(frame: DAURecord[], n: number, seed: number = SAMPLIN
         [idx[i], idx[j]] = [idx[j], idx[i]];
     }
     return idx.slice(0, k).map((i) => frame[i]);
+}
+
+/** Estrato de texto pobre: muestra aleatoria con otra semilla derivada, también anidada y reproducible. */
+export function drawPoorStratum(poor: DAURecord[], n: number, seed: number = SAMPLING_SEED): DAURecord[] {
+    return drawSample(poor, n, seed + 1);
 }
 
 export interface SampleSummary {

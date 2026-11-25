@@ -19,7 +19,8 @@ import { mentionsAffirmed } from '@/lib/triage/textMatch';
 import { contentWordCount, normalizeComplaintCategory, textLengthBin } from '@/lib/dau/categories';
 import { evaluateRules } from '@/lib/triage/ruleEngine';
 import type { DAUClassification, DAUOutcome, DAURecord } from '@/lib/dau/types';
-import { buildFrame, drawSample, suggestSampleSize, summarizeRecords } from '@/lib/dau/sampling';
+import { specificWordCount, textInfoClass } from '@/lib/dau/textInfo';
+import { buildFrame, drawPoorStratum, drawSample, suggestSampleSize, summarizeRecords } from '@/lib/dau/sampling';
 
 // ── Estadística ──────────────────────────────────────────────────────────
 describe('estadística', () => {
@@ -434,7 +435,7 @@ describe('muestreo del estudio', () => {
         ];
         const f = buildFrame(recs, { excludePediatric: true });
         expect(f.records.map((r) => r.record_id)).toEqual(['r1', 'r6']);
-        expect(f.excluded).toEqual({ sin_tens: 1, sin_desenlace: 1, registro_de_prueba: 1, menores: 1 });
+        expect(f.excluded).toEqual({ sin_tens: 1, sin_desenlace: 1, registro_de_prueba: 1, menores: 1, texto_sin_contenido: 0 });
         expect(buildFrame(recs, { excludePediatric: false }).records.map((r) => r.record_id)).toEqual(['r1', 'r4', 'r6']);
     });
 
@@ -456,5 +457,31 @@ describe('muestreo del estudio', () => {
         expect(sum.meets_minimum).toBe(true);
         expect(suggestSampleSize(0.05)).toBe(Math.ceil((73 / 0.05) * 1.15));
         expect(suggestSampleSize(0)).toBeNull();
+    });
+
+    describe('riqueza del texto', () => {
+        it('cuenta solo palabras específicas', () => {
+            expect(specificWordCount('ref/ malestar')).toBe(0);
+            expect(specificWordCount('ingresa')).toBe(0);
+            expect(specificWordCount('Ref. dolor abdominal')).toBe(2);
+            expect(specificWordCount('dolor torácico con irradiación al brazo izquierdo')).toBe(5);
+        });
+        it('clasifica informativo, pobre y sin contenido', () => {
+            expect(textInfoClass('dolor torácico opresivo desde ayer')).toBe('informativo');
+            expect(textInfoClass('ref dolor lumbar')).toBe('pobre');
+            expect(textInfoClass('malestar general')).toBe('sin_contenido');
+        });
+        it('el marco separa texto informativo, estrato pobre y sin contenido', () => {
+            const recs: DAURecord[] = [
+                mk(1, 'alta', { chief_complaint: 'dolor torácico opresivo desde ayer' }),
+                mk(2, 'hospitalizacion', { chief_complaint: 'ref dolor lumbar' }),
+                mk(3, 'alta', { chief_complaint: 'malestar general' }),
+            ];
+            const f = buildFrame(recs, { excludePediatric: true, minSpecificWords: 3 });
+            expect(f.records.map((r) => r.record_id)).toEqual(['r1']);
+            expect(f.poor_records.map((r) => r.record_id)).toEqual(['r2']);
+            expect(f.excluded.texto_sin_contenido).toBe(1);
+            expect(drawPoorStratum(f.poor_records, 5)).toHaveLength(1);
+        });
     });
 });
