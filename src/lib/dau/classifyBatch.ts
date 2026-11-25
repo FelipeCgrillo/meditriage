@@ -1,5 +1,6 @@
 import { classifyFromText } from '@/lib/triage/classify';
 import { complaintKey, deidentifyText } from '@/lib/dau/deidentify';
+import { textInfoClass } from '@/lib/dau/textInfo';
 import { contentWordCount, normalizeComplaintCategory } from '@/lib/dau/categories';
 import type { DAURecord, DAUClassification } from '@/lib/dau/types';
 import type { TriageResponse } from '@/lib/ai/schemas';
@@ -109,6 +110,7 @@ export async function classifyRecord(record: DAURecord): Promise<DAUClassificati
         vitals_removed: prepared.vitalsRemoved,
         deid_categories: prepared.categories,
         complaint_key: complaintKey(prepared.chiefComplaint),
+        text_info: textInfoClass([prepared.chiefComplaint, prepared.reportedSymptoms].filter(Boolean).join('. ')),
         text_words: contentWordCount([prepared.chiefComplaint, prepared.reportedSymptoms].filter(Boolean).join('. ')),
     };
 }

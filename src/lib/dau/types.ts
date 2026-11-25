@@ -100,6 +100,8 @@ export interface DAUClassification {
     category_derived?: boolean;
     /** Palabras de contenido del relato enviado (medida objetiva de su riqueza). */
     text_words?: number;
+    /** Riqueza del texto (palabras específicas): informativo, pobre o sin contenido. */
+    text_info?: 'informativo' | 'pobre' | 'sin_contenido';
     /** true si se retiraron signos vitales u observaciones del examinador. */
     vitals_removed?: boolean;
     /** Categorías de identificadores sustituidos en el relato. */

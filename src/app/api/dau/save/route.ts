@@ -39,6 +39,7 @@ const FINGERPRINT_KEYS: (keyof ProtocolFingerprint)[] = [
     'deid_version',
     'effort',
     'categories_version',
+    'text_info_version',
 ];
 
 export async function POST(req: Request): Promise<Response> {
@@ -110,6 +111,7 @@ export async function POST(req: Request): Promise<Response> {
             deid_version: protocol.deid_version,
             effort: protocol.effort,
             categories_version: protocol.categories_version,
+            text_info_version: protocol.text_info_version,
             study_metrics: study,
         })
         .select('id')

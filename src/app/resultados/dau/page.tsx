@@ -3,6 +3,7 @@
 import React, { useMemo, useState } from 'react';
 import { parseDAUFile, type DAUParseError } from '@/lib/dau/parser';
 import { summarizeDAU } from '@/lib/dau/summary';
+import { DEFAULT_POOR_STRATUM_SIZE, MIN_SPECIFIC_WORDS } from '@/lib/dau/textInfo';
 import {
     computeStudyMetrics,
     INTERPRETATION_LABELS,
@@ -26,6 +27,7 @@ import {
     APPROX_USD_PER_RECORD_HIGH,
     APPROX_USD_PER_RECORD_LOW,
     buildFrame,
+    drawPoorStratum,
     DEFAULT_SAMPLE_SIZE,
     drawSample,
     MIN_HIGH_SEVERITY,
@@ -93,7 +95,8 @@ export default function DAUAnalysisPage() {
     const [allRecords, setAllRecords] = useState<DAURecord[]>([]);
     const [excludePediatric, setExcludePediatric] = useState(true);
     const [sampleSizeInput, setSampleSizeInput] = useState(String(DEFAULT_SAMPLE_SIZE));
-    const [sampleFixed, setSampleFixed] = useState<{ n: number; high: number; critical: number } | null>(null);
+    const [sampleFixed, setSampleFixed] = useState<{ n: number; poor: number; high: number; critical: number } | null>(null);
+    const [poorSizeInput, setPoorSizeInput] = useState(String(DEFAULT_POOR_STRATUM_SIZE));
     const [parseErrors, setParseErrors] = useState<DAUParseError[]>([]);
     const [parseWarnings, setParseWarnings] = useState<DAUParseError[]>([]);
     const [reviewIdx, setReviewIdx] = useState<number[]>([]);
@@ -114,7 +117,7 @@ export default function DAUAnalysisPage() {
     const [startedAt, setStartedAt] = useState<string | null>(null);
 
     const frame: Frame | null = useMemo(
-        () => (allRecords.length > 0 ? buildFrame(allRecords, { excludePediatric }) : null),
+        () => (allRecords.length > 0 ? buildFrame(allRecords, { excludePediatric, minSpecificWords: MIN_SPECIFIC_WORDS }) : null),
         [allRecords, excludePediatric],
     );
     const frameSummary = useMemo(() => (frame ? summarizeRecords(frame.records) : null), [frame]);
@@ -161,15 +164,19 @@ export default function DAUAnalysisPage() {
     function fixSample() {
         if (!frame) return;
         const n = Math.max(1, Math.floor(Number(sampleSizeInput) || DEFAULT_SAMPLE_SIZE));
-        const sample = drawSample(frame.records, n, SAMPLING_SEED);
-        const sum = summarizeRecords(sample);
+        const main = drawSample(frame.records, n, SAMPLING_SEED);
+        const poorN = Math.max(0, Math.floor(Number(poorSizeInput) || 0));
+        const poor = drawPoorStratum(frame.poor_records, poorN, SAMPLING_SEED);
+        const sample = [...main, ...poor];
+        // El mínimo de casos graves se evalúa sobre el marco principal, sin el estrato de texto pobre.
+        const sum = summarizeRecords(main);
         const prep = prepareRecords(sample);
         resetRun();
         setReviewApproved(false);
         setDecisions({});
         setPrepared(prep);
         setReviewIdx(reviewSampleIndices(prep.length));
-        setSampleFixed({ n: sample.length, high: sum.high_severity, critical: sum.critical });
+        setSampleFixed({ n: sample.length, poor: poor.length, high: sum.high_severity, critical: sum.critical });
     }
 
     async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -366,6 +373,9 @@ export default function DAUAnalysisPage() {
                               file_records: frame.total_file,
                               eligible_records: frame.records.length,
                               sample_size: sampleFixed.n,
+                              poor_text_stratum_size: sampleFixed.poor,
+                              min_specific_words: MIN_SPECIFIC_WORDS,
+                              poor_text_records_available: frame.poor_records.length,
                               exclude_pediatric: excludePediatric,
                               exclusions: frame.excluded,
                           }
@@ -472,6 +482,8 @@ export default function DAUAnalysisPage() {
                         sampleSizeInput={sampleSizeInput}
                         setSampleSizeInput={setSampleSizeInput}
                         fixed={sampleFixed}
+                        poorSizeInput={poorSizeInput}
+                        setPoorSizeInput={setPoorSizeInput}
                         onFix={fixSample}
                     />
                 )}
@@ -567,10 +579,12 @@ function SamplingSection(props: {
     setExcludePediatric: (v: boolean) => void;
     sampleSizeInput: string;
     setSampleSizeInput: (v: string) => void;
-    fixed: { n: number; high: number; critical: number } | null;
+    fixed: { n: number; poor: number; high: number; critical: number } | null;
+    poorSizeInput: string;
+    setPoorSizeInput: (v: string) => void;
     onFix: () => void;
 }) {
-    const { frame, frameSummary, excludePediatric, setExcludePediatric, sampleSizeInput, setSampleSizeInput, fixed, onFix } = props;
+    const { frame, frameSummary, excludePediatric, setExcludePediatric, sampleSizeInput, setSampleSizeInput, fixed, onFix, poorSizeInput, setPoorSizeInput } = props;
     const eligible = frame.records.length;
     const prevalence = eligible > 0 ? frameSummary.high_severity / eligible : 0;
     const suggested = suggestSampleSize(prevalence);
@@ -597,6 +611,8 @@ function SamplingSection(props: {
                         <li>{fmt(ex.sin_tens)} sin categoría TENS</li>
                         <li>{fmt(ex.menores)} menores de 18 años</li>
                         <li>{fmt(ex.registro_de_prueba)} registros de prueba</li>
+                        <li>{fmt(ex.texto_sin_contenido)} sin palabras específicas en el motivo</li>
+                        <li>{fmt(frame.poor_records.length)} con texto pobre (1 o 2 palabras específicas), disponibles para el estrato aparte</li>
                     </ul>
                     <label className="mt-2 flex items-center gap-2">
                         <input type="checkbox" checked={excludePediatric} onChange={(e) => setExcludePediatric(e.target.checked)} />
@@ -627,6 +643,16 @@ function SamplingSection(props: {
                         className="w-32 rounded border border-gray-300 px-2 py-1.5 text-sm"
                     />
                 </label>
+                <label className="flex flex-col gap-1">
+                    <span className="font-medium text-gray-700">Estrato de texto pobre</span>
+                    <input
+                        type="number"
+                        min={0}
+                        value={poorSizeInput}
+                        onChange={(e) => setPoorSizeInput(e.target.value)}
+                        className="w-32 rounded border border-gray-300 px-2 py-1.5 text-sm"
+                    />
+                </label>
                 <button
                     onClick={onFix}
                     disabled={eligible === 0 || tooBig}
@@ -641,7 +667,7 @@ function SamplingSection(props: {
             {tooBig && <p className="mt-2 text-xs text-red-700">Una muestra de más de 3.000 registros excede lo aprobado por el CEC y su costo. Reduzca el tamaño.</p>}
             {fixed && (
                 <p className={`mt-3 rounded p-2 text-xs ${fixed.high >= MIN_HIGH_SEVERITY ? 'bg-green-50 text-green-800' : 'bg-amber-50 text-amber-800'}`}>
-                    Muestra fijada: {fmt(fixed.n)} registros, con <strong>{fixed.high}</strong> de alta gravedad ({fixed.critical} críticos).{' '}
+                    Muestra fijada: {fmt(fixed.n)} registros ({fmt(fixed.n - fixed.poor)} del marco principal y {fmt(fixed.poor)} del estrato de texto pobre), con <strong>{fixed.high}</strong> de alta gravedad ({fixed.critical} críticos).{' '}
                     {fixed.high >= MIN_HIGH_SEVERITY
                         ? 'Alcanza el mínimo del protocolo.'
                         : `No alcanza el mínimo de ${MIN_HIGH_SEVERITY}: amplíe la muestra. La ampliación contiene a la actual.`}

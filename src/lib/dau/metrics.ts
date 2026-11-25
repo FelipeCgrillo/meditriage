@@ -185,6 +185,8 @@ export interface StudyMetrics {
     by_age_group: StratumMetrics[];
     /** Por longitud del relato (tramos fijados a priori): mide si más texto mejora el desempeño. */
     by_text_length: StratumMetrics[];
+    /** Texto informativo (marco principal) frente al estrato de texto pobre. */
+    by_text_info: StratumMetrics[];
 }
 
 function buildRows(results: DAUClassification[], pick: (r: DAUClassification) => number | null | undefined): PairedRow[] {
@@ -362,5 +364,6 @@ export function computeStudyMetrics(
         by_sex: strata(results, (r) => r.sex),
         by_age_group: strata(results, (r) => r.age_group),
         by_text_length: strata(results, (r) => textLengthBin(r.text_words)),
+        by_text_info: strata(results, (r) => r.text_info ?? null),
     };
 }
