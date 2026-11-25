@@ -96,6 +96,7 @@ export default function DAUAnalysisPage() {
     const [excludePediatric, setExcludePediatric] = useState(true);
     const [sampleSizeInput, setSampleSizeInput] = useState(String(DEFAULT_SAMPLE_SIZE));
     const [sampleFixed, setSampleFixed] = useState<{ n: number; poor: number; high: number; critical: number } | null>(null);
+    const [poorIds, setPoorIds] = useState<Set<string>>(new Set());
     const [poorSizeInput, setPoorSizeInput] = useState(String(DEFAULT_POOR_STRATUM_SIZE));
     const [parseErrors, setParseErrors] = useState<DAUParseError[]>([]);
     const [parseWarnings, setParseWarnings] = useState<DAUParseError[]>([]);
@@ -168,6 +169,7 @@ export default function DAUAnalysisPage() {
         const poorN = Math.max(0, Math.floor(Number(poorSizeInput) || 0));
         const poor = drawPoorStratum(frame.poor_records, poorN, SAMPLING_SEED);
         const sample = [...main, ...poor];
+        setPoorIds(new Set(poor.map((r) => r.record_id)));
         // El mínimo de casos graves se evalúa sobre el marco principal, sin el estrato de texto pobre.
         const sum = summarizeRecords(main);
         const prep = prepareRecords(sample);
@@ -287,11 +289,11 @@ export default function DAUAnalysisPage() {
             // Corrida interrumpida: se conservan los resultados parciales para exportarlos,
             // pero no se guardan en la base de datos como corrida completa.
             setError(`${failed} Procesados ${accumulated.length} de ${toSend.length}. Los resultados parciales se pueden exportar.`);
-            if (accumulated.length > 0) setStudy(computeStudyMetrics(accumulated));
+            if (accumulated.length > 0) setStudy(computeStudyMetrics(accumulated, { poorIds }));
             return;
         }
         if (accumulated.length > 0) {
-            const finalStudy = computeStudyMetrics(accumulated);
+            const finalStudy = computeStudyMetrics(accumulated, { poorIds });
             setStudy(finalStudy);
             await saveRun(accumulated, { ...summarizeDAU(accumulated), study: finalStudy }, runProtocol);
         }
@@ -321,6 +323,7 @@ export default function DAUAnalysisPage() {
                     results: res,
                     summary: { ...sum, study: undefined },
                     protocol: prot,
+                    poor_record_ids: Array.from(poorIds),
                 }),
             });
             const data = (await resp.json()) as { ok?: boolean; run_id?: string; saved?: number; error?: string };

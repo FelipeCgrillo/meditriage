@@ -173,6 +173,8 @@ export interface StudyMetrics {
     missing_tens: number;
     missing_outcome: number;
     /** Análisis principal: sistema integrado (LLM + motor de reglas). */
+    /** Estrato de texto pobre: se reporta aparte y no entra en el criterio de continuidad. */
+    poor_text_stratum: { n: number; block: ComparisonBlock | null };
     primary: ComparisonBlock;
     continuity: ContinuityVerdict;
     /** Ablación: ESI del LLM aislado, antes del motor de reglas. */
@@ -334,8 +336,13 @@ function strata(results: DAUClassification[], keyOf: (r: DAUClassification) => s
 /** Calcula todas las métricas del estudio sobre un lote clasificado. */
 export function computeStudyMetrics(
     results: DAUClassification[],
-    options: { bootstrap?: number } = {},
+    options: { bootstrap?: number; poorIds?: ReadonlySet<string> } = {},
 ): StudyMetrics {
+    // El estrato de texto pobre se analiza aparte: el análisis principal, la
+    // ablación y el criterio de continuidad usan solo el marco principal.
+    const poorIds = options.poorIds;
+    const poorResults = poorIds ? results.filter((r) => poorIds.has(r.record_id)) : [];
+    if (poorIds && poorResults.length > 0) results = results.filter((r) => !poorIds.has(r.record_id));
     const primaryRows = buildRows(results, (r) => r.predicted_esi);
     const primary = compareBlock(primaryRows, options);
 
@@ -355,6 +362,10 @@ export function computeStudyMetrics(
         needs_info: results.filter((r) => r.status === 'needs_info').length,
         missing_tens: results.filter((r) => !isValidEsi(r.tens_esi)).length,
         missing_outcome: results.filter((r) => r.outcome == null).length,
+        poor_text_stratum: {
+            n: poorResults.length,
+            block: poorResults.length > 0 ? compareBlock(buildRows(poorResults, (r) => r.predicted_esi), options) : null,
+        },
         primary,
         continuity: continuityVerdict(primary),
         ablation_llm,

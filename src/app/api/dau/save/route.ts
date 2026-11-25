@@ -30,6 +30,8 @@ interface SavePayload {
     summary: DAUSummary;
     protocol?: ProtocolFingerprint | null;
     organization_slug?: string | null;
+    /** record_id del estrato de texto pobre (se analiza aparte). */
+    poor_record_ids?: string[];
 }
 
 const FINGERPRINT_KEYS: (keyof ProtocolFingerprint)[] = [
@@ -88,7 +90,7 @@ export async function POST(req: Request): Promise<Response> {
     }
 
     // Las métricas se recalculan en el servidor: no se confía en el cliente.
-    const study = computeStudyMetrics(results);
+    const study = computeStudyMetrics(results, { poorIds: new Set(Array.isArray(body.poor_record_ids) ? body.poor_record_ids : []) });
 
     const supabase = await createSupabaseServerClient();
     const { data: run, error: runError } = await supabase
