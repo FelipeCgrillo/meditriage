@@ -484,4 +484,25 @@ describe('muestreo del estudio', () => {
             expect(drawPoorStratum(f.poor_records, 5)).toHaveLength(1);
         });
     });
+
+    describe('estrato de texto pobre en las métricas', () => {
+        const mkRes = (id: string, tool: number, tens: number, outcome: 'alta' | 'hospitalizacion'): DAUClassification =>
+            ({ record_id: id, predicted_esi: tool, tens_esi: tens, outcome, status: 'success' }) as unknown as DAUClassification;
+        it('el análisis principal y la continuidad excluyen al estrato pobre, que se reporta aparte', () => {
+            const results = [
+                mkRes('a', 2, 2, 'hospitalizacion'),
+                mkRes('b', 4, 3, 'alta'),
+                mkRes('c', 5, 5, 'hospitalizacion'),
+                mkRes('d', 3, 3, 'alta'),
+            ];
+            const sin = computeStudyMetrics(results);
+            const con = computeStudyMetrics(results, { poorIds: new Set(['c']) });
+            expect(sin.total).toBe(4);
+            expect(con.total).toBe(3);
+            expect(con.primary.n_high_severity).toBe(1);
+            expect(con.poor_text_stratum.n).toBe(1);
+            expect(con.poor_text_stratum.block?.n_high_severity).toBe(1);
+            expect(sin.poor_text_stratum.n).toBe(0);
+        });
+    });
 });
